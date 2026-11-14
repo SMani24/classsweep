@@ -1,0 +1,27 @@
+# Private runtime state and credentials must never be published.
+.env
+.env.*
+!.env.example
+data/
+private/
+*.sqlite
+*.sqlite3
+*.db
+*.pem
+*.key
+*.jks
+*.keystore
+key.properties
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+.ruff_cache/
+outputs/
+work/
+# Downloaded upstream model weights are reproducible with scripts/fetch_models.py.
+mobile/assets/models/*.onnx
+*.apk
+*.aab
+dist/

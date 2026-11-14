@@ -21,6 +21,22 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
+        // Match all bundled libraries to Flutter's requested CPU targets.
+        // This also prevents a 32-bit device selecting an incomplete native ABI.
+        ndk {
+            abiFilters.clear()
+            abiFilters.addAll(
+                providers.gradleProperty("target-platform").orElse("android-arm64").get()
+                    .split(",").mapNotNull {
+                        when (it) {
+                            "android-arm" -> "armeabi-v7a"
+                            "android-arm64" -> "arm64-v8a"
+                            "android-x64" -> "x86_64"
+                            else -> null
+                        }
+                    }
+            )
+        }
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`

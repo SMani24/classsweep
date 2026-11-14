@@ -73,7 +73,8 @@ Uint8List packNv21(CameraImage image) {
     }
     return out;
   }
-  if (image.format.group != ImageFormatGroup.yuv420 || image.planes.length != 3) {
+  if (image.format.group != ImageFormatGroup.yuv420 ||
+      image.planes.length != 3) {
     throw UnsupportedError('Expected YUV420/NV21/BGRA camera frame');
   }
   final yp = image.planes[0], u = image.planes[1], v = image.planes[2];

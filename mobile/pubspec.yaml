@@ -40,6 +40,7 @@ flutter:
 hooks:
   user_defines:
     dartcv4:
+      parallel_jobs: 3
       include_modules:
         - imgproc
         - imgcodecs

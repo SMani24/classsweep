@@ -1,0 +1,313 @@
+import 'package:flutter/material.dart';
+
+import 'app_model.dart';
+import 'classsweep_app.dart';
+import 'photo_page.dart';
+
+class AuthPage extends StatefulWidget {
+  const AuthPage({super.key, required this.model});
+  final AppModel model;
+  @override
+  State<AuthPage> createState() => _AuthPageState();
+}
+
+class _AuthPageState extends State<AuthPage> {
+  final _form = GlobalKey<FormState>();
+  final _name = TextEditingController(),
+      _id = TextEditingController(),
+      _password = TextEditingController();
+  bool _register = false, _busy = false, _obscure = true;
+  String? _error;
+  @override
+  void dispose() {
+    _name.dispose();
+    _id.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_form.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.model.authenticate(
+        register: _register,
+        username: _id.text.trim(),
+        password: _password.text,
+        name: _name.text.trim(),
+      );
+      _password.clear();
+    } catch (error) {
+      if (mounted) setState(() => _error = friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text(
+        'ClassSweep',
+        style: TextStyle(fontWeight: FontWeight.w800),
+      ),
+      actions: [
+        IconButton(
+          tooltip: 'Server settings',
+          onPressed: _busy
+              ? null
+              : () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => SettingsPage(model: widget.model),
+                  ),
+                ),
+          icon: const Icon(Icons.tune_rounded),
+        ),
+      ],
+    ),
+    body: AutofillGroup(
+      child: Form(
+        key: _form,
+        child: PageBody(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(26),
+              decoration: BoxDecoration(
+                color: navy,
+                borderRadius: BorderRadius.circular(26),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.radar_rounded, color: Color(0xff65ddd0), size: 42),
+                  SizedBox(height: 20),
+                  Text(
+                    'Be here.\nCheck in securely.',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 32,
+                      height: 1.15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  SizedBox(height: 14),
+                  Text(
+                    'Classroom and identity checks happen on your phone.',
+                    style: TextStyle(color: Color(0xffbed4de), height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('Sign in')),
+                ButtonSegment(value: true, label: Text('Create account')),
+              ],
+              selected: {_register},
+              onSelectionChanged: _busy
+                  ? null
+                  : (v) => setState(() {
+                      _register = v.first;
+                      _error = null;
+                    }),
+            ),
+            if (_register)
+              TextFormField(
+                controller: _name,
+                enabled: !_busy,
+                textCapitalization: TextCapitalization.words,
+                maxLength: 100,
+                autofillHints: const [AutofillHints.name],
+                decoration: const InputDecoration(
+                  labelText: 'Full name',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Enter your name.' : null,
+              ),
+            TextFormField(
+              controller: _id,
+              enabled: !_busy,
+              autocorrect: false,
+              autofillHints: const [AutofillHints.username],
+              decoration: const InputDecoration(
+                labelText: 'Student ID',
+                prefixIcon: Icon(Icons.badge_outlined),
+              ),
+              validator: (v) =>
+                  RegExp(r'^[a-zA-Z0-9_.-]{3,64}$').hasMatch(v?.trim() ?? '')
+                  ? null
+                  : 'Use 3–64 letters, digits, dots, underscores or hyphens.',
+            ),
+            TextFormField(
+              controller: _password,
+              enabled: !_busy,
+              obscureText: _obscure,
+              autocorrect: false,
+              autofillHints: [
+                _register ? AutofillHints.newPassword : AutofillHints.password,
+              ],
+              decoration: InputDecoration(
+                labelText: 'Password',
+                prefixIcon: const Icon(Icons.lock_outline),
+                suffixIcon: IconButton(
+                  tooltip: _obscure ? 'Show password' : 'Hide password',
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                  icon: Icon(
+                    _obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                ),
+              ),
+              validator: (v) => v == null || v.isEmpty
+                  ? 'Enter your password.'
+                  : _register && (v.length < 10 || v.length > 256)
+                  ? 'Use 10–256 characters.'
+                  : null,
+              onFieldSubmitted: (_) {
+                if (!_busy) _submit();
+              },
+            ),
+            if (_error != null) ErrorNotice(_error!),
+            FilledButton(
+              onPressed: _busy ? null : _submit,
+              child: Text(
+                _busy
+                    ? 'Connecting…'
+                    : _register
+                    ? 'Create my account'
+                    : 'Sign in',
+              ),
+            ),
+            if (_register)
+              const Text(
+                'Your account will be bound to this installation’s random device ID. Enrollment approval is required before attendance.',
+                style: TextStyle(color: Color(0xff536e7a), height: 1.5),
+              ),
+            Text(
+              'Server · ${widget.model.serverUrl}',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            TextButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            PhotoPage(model: widget.model, calibration: true),
+                      ),
+                    ),
+              icon: const Icon(Icons.meeting_room_outlined),
+              label: const Text('Instructor · Calibrate classroom'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key, required this.model});
+  final AppModel model;
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late final _url = TextEditingController(text: widget.model.serverUrl);
+  bool _busy = false;
+  String? _error;
+  @override
+  void dispose() {
+    _url.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.model.changeServer(_url.text);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _error = friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Connection & privacy')),
+    body: PageBody(
+      children: [
+        const SectionTitle(
+          'Your classroom server',
+          'Connect to the instructor’s running ClassSweep server.',
+        ),
+        TextField(
+          controller: _url,
+          enabled: !_busy,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: const InputDecoration(
+            labelText: 'Server URL',
+            hintText: 'http://192.168.1.20:8000',
+          ),
+        ),
+        const InfoCard(
+          icon: Icons.wifi_rounded,
+          title: 'On the same Wi-Fi',
+          body: 'Enter the computer’s local IP address, for example http://192.168.1.20:8000. The computer must allow connections to port 8000.',
+        ),
+        const InfoCard(
+          icon: Icons.usb_rounded,
+          title: 'Connected by USB',
+          body: 'After running adb reverse tcp:8000 tcp:8000 on your computer, use http://127.0.0.1:8000. On a phone, 127.0.0.1 refers to the phone unless forwarding is enabled.',
+        ),
+        const Text(
+          'Changing servers signs you out. Local HTTP is intended for a trusted classroom network; use HTTPS for remote access.',
+          style: TextStyle(height: 1.5),
+        ),
+        if (_error != null) ErrorNotice(_error!),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: Text(_busy ? 'Saving…' : 'Save server'),
+        ),
+        const InfoCard(
+          icon: Icons.shield_outlined,
+          title: 'Images stay local during attendance',
+          body: 'Only your one-time enrollment photo is uploaded for instructor review. Attendance sends measured results, never camera frames. The approved face template is stored in encrypted device storage, scoped to your account and server.',
+        ),
+        Text(
+          'Device binding · ${widget.model.deviceId.isEmpty ? 'Unavailable' : widget.model.deviceId.substring(0, 12)}…',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        OutlinedButton.icon(
+          onPressed: _busy
+              ? null
+              : () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        PhotoPage(model: widget.model, calibration: true),
+                  ),
+                ),
+          icon: const Icon(Icons.meeting_room_outlined),
+          label: const Text('Instructor calibration'),
+        ),
+      ],
+    ),
+  );
+}

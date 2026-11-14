@@ -35,3 +35,17 @@ flutter:
   uses-material-design: true
   assets:
     - assets/models/
+
+# Native OpenCV symbols required by local scene, face, and motion processing.
+hooks:
+  user_defines:
+    dartcv4:
+      include_modules:
+        - imgproc
+        - imgcodecs
+        - calib3d
+        - features2d
+        - flann
+        - dnn
+        - objdetect
+        - video

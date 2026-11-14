@@ -1,0 +1,1 @@
+"""ClassSweep local attendance server."""

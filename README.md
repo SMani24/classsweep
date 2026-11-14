@@ -14,6 +14,8 @@ Students scan fresh handwritten codes on opposite sides of the board, follow a s
 
 **Android is the current target. iOS is deferred; no iOS build or device validation is claimed.**
 
+Local verification passes 11 server tests and 16 app/native tests, with clean static analysis and a signed debug APK. [Validation status](docs/VALIDATION.md) distinguishes these checks from the physical-phone evaluation still needed.
+
 ## Quick start
 
 On Linux, from the repository root:

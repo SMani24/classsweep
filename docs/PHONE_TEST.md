@@ -28,6 +28,8 @@ For a Wi-Fi-only demonstration, start `python3 scripts/run_server.py --lan`, put
 
 ## 3. Build and install
 
+If you already have the supplied `ClassSweep-debug.apk`, install it directly with `adb install -r /path/to/ClassSweep-debug.apk` and skip the build. It is an ARM64 debug package for Android 7.0 or newer.
+
 Flutter and Android SDK/build tools must be installed. The repository's pinned dependencies and model manifest are used by:
 
 ```bash

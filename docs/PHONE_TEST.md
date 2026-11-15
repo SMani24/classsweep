@@ -34,10 +34,12 @@ Flutter and Android SDK/build tools must be installed. The repository's pinned d
 
 ```bash
 ./scripts/build_android.sh
-adb install -r mobile/build/app/outputs/flutter-apk/app-debug.apk
+adb install -r "$HOME/apks/ClassSweep-debug.apk"
 ```
 
 The first build compiles OpenCV and may take several minutes. Native builds are capped at three workers to avoid overwhelming the laptop. The supplied build targets 64-bit ARM Android phones. An older 32-bit phone needs a separate `--target-platform android-arm` build.
+
+Successful builds replace `~/apks/ClassSweep-debug.apk` with the latest version. You can copy that same file to the phone after each edit. Override the destination with `CLASSSWEEP_APK_DIR` if needed.
 
 ## 4. Prepare the room
 

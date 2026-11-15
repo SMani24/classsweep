@@ -7,4 +7,7 @@ flutter pub get
 flutter analyze
 flutter test
 flutter build apk --debug --target-platform android-arm64
-echo "APK: $ROOT_DIR/mobile/build/app/outputs/flutter-apk/app-debug.apk"
+APK_DIR="${CLASSSWEEP_APK_DIR:-$HOME/apks}"
+mkdir -p "$APK_DIR"
+install -m 644 "$ROOT_DIR/mobile/build/app/outputs/flutter-apk/app-debug.apk" "$APK_DIR/ClassSweep-debug.apk"
+echo "APK: $APK_DIR/ClassSweep-debug.apk"

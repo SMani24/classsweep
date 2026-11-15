@@ -32,10 +32,12 @@ Build and install on a USB-connected Android phone with debugging enabled:
 ```bash
 ./scripts/build_android.sh
 adb reverse tcp:8000 tcp:8000
-adb install -r mobile/build/app/outputs/flutter-apk/app-debug.apk
+adb install -r "$HOME/apks/ClassSweep-debug.apk"
 ```
 
 Use `http://127.0.0.1:8000` in the phone app. Follow the [phone test guide](docs/PHONE_TEST.md) for calibration, enrollment approval, and your first attendance session. Flutter and the Android SDK must be installed. The first native OpenCV build takes several minutes; the default APK targets 64-bit ARM phones.
+
+Each successful build updates `~/apks/ClassSweep-debug.apk`, alongside your other APKs. Set `CLASSSWEEP_APK_DIR` to use a different destination.
 
 ## First demonstration
 

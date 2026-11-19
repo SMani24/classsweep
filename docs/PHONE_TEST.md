@@ -36,16 +36,16 @@ The first build compiles OpenCV and may take several minutes. Native builds are 
 
 Successful builds replace `~/apks/ClassSweep-debug.apk` with the latest version. You can copy that same file to the phone after each edit. Override the destination with `CLASSSWEEP_APK_DIR` if needed.
 
-## 4. Prepare the room
+## 4. Rehearse with two phones
 
-1. In the app, open instructor calibration, enter the server's administrator password, and capture a textured, mostly flat board region with stable surroundings. Only extracted reference features are sent to the server.
-2. Register a student account, capture and submit an enrollment photograph, and approve it in the laptop dashboard after checking the person.
-3. Refresh the app's enrollment status and install the approved local face reference.
-4. In the dashboard, create a short attendance session. Write its two fresh four-digit codes far apart on the board, clearly and large enough for the phone to read. Avoid other four-digit numbers in the captured region.
-5. Start attendance and follow the camera instructions: scan the codes, complete the pan/pause/return movement, verify the face, and recheck the board.
-6. Check the attendance record on the laptop and export CSV.
+1. On the instructor phone, open **Instructor sign-in** and enter the server's administrator password. Relaunch the app once to verify that the sign-in is remembered.
+2. Open **Classroom calibration → Open camera**. Frame a textured, mostly flat board area. Take a photo, tap **Use photo**, and save the classroom reference.
+3. On the student phone, register and tap **Enroll my face**. Follow the front, left and right prompts. Review the photos and submit the front photo for approval. Approve it in the laptop dashboard and wait for **Ready to check in** on the phone.
+4. In the laptop dashboard, create a session. Open **Override board codes for testing** if you already have two paper codes. Close the old session before reusing them. Leave GPS off for the first trial.
+5. Tap **Start check-in**. Hold one code in view until it is recognized. Choose the side where the other code is posted, follow the pan arrow, hold on the second code and pan back when prompted.
+6. Follow the selfie prompts, then show the calibrated board and a code again. Tap **Record my attendance** and check **My attendance** and the laptop session's result count.
 
-Use an empty classroom or your own room initially. The classroom reference needs texture; a blank whiteboard alone is unsuitable. One reference view is not guaranteed to match every seat. Recalibrate and use nearby seating for the first functional trial.
+Use an empty classroom or your own room initially. Include texture in the reference and start near the calibration viewpoint. One reference view may not match every seat.
 
 ## What to report from your phone
 

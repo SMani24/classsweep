@@ -4,8 +4,7 @@ import '../location/location.dart';
 import 'app_model.dart';
 import 'classsweep_app.dart';
 
-/// Admin credentials and the pending center exist only in this page's state.
-/// Available without student sign-in; all admin operations authenticate separately.
+/// Session controls use the active instructor sign-in.
 class InstructorPage extends StatefulWidget {
   const InstructorPage({super.key, required this.model, this.verifier});
   final AppModel model;
@@ -17,7 +16,6 @@ class InstructorPage extends StatefulWidget {
 
 class _InstructorPageState extends State<InstructorPage> {
   final _form = GlobalKey<FormState>();
-  final _password = TextEditingController();
   final _title = TextEditingController();
   final _ttl = TextEditingController(text: '300');
   late final _verifier = widget.verifier ?? LocationVerifier();
@@ -30,20 +28,12 @@ class _InstructorPageState extends State<InstructorPage> {
 
   @override
   void dispose() {
-    _password.clear();
-    _password.dispose();
     _title.dispose();
     _ttl.dispose();
     _center = null;
     _created = null;
     _sessions.clear();
     super.dispose();
-  }
-
-  bool _hasPassword() {
-    if (_password.text.isNotEmpty) return true;
-    setState(() => _error = 'Enter the instructor password.');
-    return false;
   }
 
   void _start() {
@@ -93,17 +83,17 @@ class _InstructorPageState extends State<InstructorPage> {
           : const GpsPolicy.disabled();
       // A capture may finish after the page has been closed. Do not create then.
       if (!mounted) return;
-      final result = await widget.model.api.createInstructorSession(
-        _password.text,
-        {'title': title, 'ttl_seconds': ttl, 'gps': center.toJson()},
-      );
+      final result = await widget.model.api.createInstructorSession({
+        'title': title,
+        'ttl_seconds': ttl,
+        'gps': center.toJson(),
+      });
       if (!mounted) return;
       setState(() {
         _center = center.enabled ? center : null;
         _created = {...result, 'gps': center.toJson()};
         _notice =
             'Attendance session created. Display both codes in the classroom.';
-        // Retain credentials for listing and disabling, only until page disposal.
       });
       await _loadSessions();
     } catch (error) {
@@ -114,7 +104,7 @@ class _InstructorPageState extends State<InstructorPage> {
   }
 
   Future<void> _loadSessions() async {
-    final result = await widget.model.api.instructorSessions(_password.text);
+    final result = await widget.model.api.instructorSessions();
     if (mounted) {
       setState(() {
         _sessions = result;
@@ -132,7 +122,6 @@ class _InstructorPageState extends State<InstructorPage> {
   }
 
   Future<void> _refresh() async {
-    if (!_hasPassword()) return;
     _start();
     try {
       await _loadSessions();
@@ -144,11 +133,10 @@ class _InstructorPageState extends State<InstructorPage> {
   }
 
   Future<void> _disable(Map<String, dynamic> session) async {
-    if (!_hasPassword()) return;
     _start();
     try {
       final id = session['id'] as String;
-      await widget.model.api.disableSessionGps(_password.text, id);
+      await widget.model.api.disableSessionGps(id);
       if (!mounted) return;
       setState(() {
         // Disable returns only {id,gps}; preserve the existing title and codes.
@@ -254,26 +242,7 @@ class _InstructorPageState extends State<InstructorPage> {
       key: _form,
       child: PageBody(
         children: [
-          const SectionTitle(
-            'Create attendance',
-            'Create a code pair for a calibrated classroom. GPS is optional and off by default.',
-          ),
-          TextFormField(
-            controller: _password,
-            enabled: !_busy,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            enableIMEPersonalizedLearning: false,
-            autofillHints: const [],
-            decoration: const InputDecoration(
-              labelText: 'Instructor password',
-              helperText: 'Kept only while this page is open.',
-            ),
-            validator: (value) => value == null || value.isEmpty
-                ? 'Enter the instructor password.'
-                : null,
-          ),
+          const SectionTitle('Create attendance', ''),
           TextFormField(
             controller: _title,
             enabled: !_busy,
@@ -302,9 +271,7 @@ class _InstructorPageState extends State<InstructorPage> {
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             title: const Text('Require GPS for this session'),
-            subtitle: const Text(
-              'Students check distance on their phone. Only a distance and accuracy summary is sent.',
-            ),
+            subtitle: const Text('Student coordinates stay on their phone.'),
             value: _gpsEnabled,
             onChanged: _busy
                 ? null
@@ -332,9 +299,7 @@ class _InstructorPageState extends State<InstructorPage> {
                       _center = null;
                     }),
             ),
-            const Text(
-              'Use current location for GPS. Stand at the classroom center. Creation always captures a fresh location; your phone may ask for permission.',
-            ),
+            const Text('Stand near the center of the room.'),
             OutlinedButton.icon(
               onPressed: _busy ? null : _capture,
               icon: const Icon(Icons.my_location),
@@ -342,10 +307,10 @@ class _InstructorPageState extends State<InstructorPage> {
             ),
             if (_center != null)
               Text(
-                'Preview accuracy: ±${_center!.accuracyM!.toStringAsFixed(1)} m · radius ${_center!.radiusM.round()} m. Location is refreshed when you create attendance.',
+                'Preview accuracy: ±${_center!.accuracyM!.toStringAsFixed(1)} m.',
               ),
             Text(
-              'Required accuracy: ±${(_radius / 2).clamp(0, 100).toStringAsFixed(1)} m or better. The server stores this session’s instructor center. No background tracking.',
+              'Required accuracy: ±${(_radius / 2).clamp(0, 100).toStringAsFixed(1)} m or better.',
             ),
           ],
           if (_busy) const LinearProgressIndicator(semanticsLabel: 'Working'),
@@ -358,10 +323,7 @@ class _InstructorPageState extends State<InstructorPage> {
             label: Text(_busy ? 'Working…' : 'Create attendance'),
           ),
           if (_created != null) _sessionCard(_created!, created: true),
-          const SectionTitle(
-            'Active sessions',
-            'GPS can be disabled immediately for an active session. To change its center or radius, create a new session.',
-          ),
+          const SectionTitle('Active sessions', ''),
           OutlinedButton.icon(
             onPressed: _busy ? null : _refresh,
             icon: const Icon(Icons.refresh),

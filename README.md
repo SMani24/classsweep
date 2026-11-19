@@ -2,7 +2,7 @@
 
 Android classroom attendance using **on-device computer vision** and a Linux laptop server. Built as an Introduction to Computer Vision course prototype.
 
-Students scan fresh handwritten codes on opposite sides of the board, follow a short camera-motion challenge, verify their face against a human-approved enrollment reference, and recheck the board. No markers or projector are needed.
+Students scan one board code at a time during a guided camera sweep, verify their face against a human-approved enrollment reference, and recheck the board. No markers or projector are needed.
 
 ## What is included
 
@@ -15,7 +15,7 @@ Students scan fresh handwritten codes on opposite sides of the board, follow a s
 
 **Android is the current target. iOS is deferred; no iOS build or device validation is claimed.**
 
-Local verification passes 17 server tests and 19 app/native tests, with clean static analysis and a signed debug APK. [Validation status](docs/VALIDATION.md) distinguishes these checks from the physical-phone evaluation still needed.
+[Validation status](docs/VALIDATION.md) records the automated checks, Android build and physical phone tests.
 
 ## Quick start
 
@@ -41,11 +41,11 @@ Each successful build updates `~/apks/ClassSweep-debug.apk`, alongside your othe
 
 ## First demonstration
 
-1. Calibrate a distinctive, mostly flat board region from the app's instructor screen.
-2. Register a student account and submit an enrollment photo.
-3. Approve the exact photo in the laptop dashboard and install its local template on the phone.
-4. Create a session from the phone’s instructor settings or laptop dashboard, and write its two codes on opposite sides of the board. The phone can optionally require GPS within a configurable radius.
-5. Follow the app's camera instructions, then check the attendance record and CSV on the laptop.
+1. On the instructor phone, choose **Instructor sign-in** and enter the dashboard password. ClassSweep saves the session. Open **Classroom calibration** and capture a textured board region in the dedicated camera.
+2. On the student phone, create an account and follow the three-pose face setup. The front photo goes to the instructor for review. The side templates stay on the phone.
+3. Approve the photo in the laptop dashboard. The student's face reference prepares automatically after approval.
+4. Create a session and write its codes on opposite sides of the board. For a rehearsal with the same paper codes, open **Override board codes for testing** on the laptop. Close the previous session before reusing its codes.
+5. Follow the on-screen arrows to scan the two codes separately, do the face turn, and recheck the board. Verify the result in the laptop dashboard.
 
 The initial calibration UI uploads one reference view. Its reliability across different seats must be evaluated. Use textured surroundings, avoid people, and start with nearby seating.
 

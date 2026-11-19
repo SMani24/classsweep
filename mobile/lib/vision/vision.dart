@@ -49,11 +49,26 @@ class SelfieFrameResult {
     required this.headYaw,
     required this.identityMatches,
     required this.liveness,
+    this.trackedFace,
   });
   final int faceCount;
   final double? similarity, headYaw;
   final bool identityMatches;
   final LivenessProgress? liveness;
+  final int? trackedFace;
+}
+
+class EnrollmentFrame {
+  const EnrollmentFrame(
+    this.message, {
+    this.inPosition = false,
+    this.sample,
+    this.photo,
+  });
+  final String message;
+  final bool inPosition;
+  final FaceReference? sample;
+  final Uint8List? photo;
 }
 
 class ClassSweepVision {
@@ -335,7 +350,10 @@ class ClassSweepVision {
     }
   }
 
-  FaceReference? _embedding(cv.Mat image) {
+  FaceReference? _embedding(cv.Mat image, {bool liveFaceConfirmed = false}) {
+    // Live frames already have a single face confirmed by ML Kit. Accept
+    // weaker YuNet landmark confidence there, especially on side poses.
+    _detector!.setScoreThreshold(liveFaceConfirmed ? .78 : .90);
     _detector!.setInputSize((image.cols, image.rows));
     final boxes = _detector!.detect(image);
     try {
@@ -383,17 +401,30 @@ class ClassSweepVision {
     }
   }
 
-  double? _similarity(FaceReference? candidate) {
-    if (candidate == null || _face == null) return null;
-    final a = cv.Mat.fromList(1, 128, cv.MatType.CV_32FC1, candidate.embedding);
-    final b = cv.Mat.fromList(1, 128, cv.MatType.CV_32FC1, _face!.embedding);
+  double compareFaces(FaceReference first, FaceReference second) {
+    final a = cv.Mat.fromList(1, 128, cv.MatType.CV_32FC1, first.embedding);
+    final b = cv.Mat.fromList(1, 128, cv.MatType.CV_32FC1, second.embedding);
     try {
       final value = _recognizer!.match(a, b);
-      return value.isFinite ? value : null;
+      return value.isFinite ? value : -1;
     } finally {
       a.dispose();
       b.dispose();
     }
+  }
+
+  double? _similarity(FaceReference? candidate, double? yaw) {
+    final reference = _face;
+    if (candidate == null || reference == null) return null;
+    final frontal = compareFaces(candidate, reference);
+    if (yaw == null || yaw.abs() <= 12 || reference.profiles.length != 2) {
+      return frontal;
+    }
+    // The front-facing phases still require the exact approved frontal reference.
+    return max(
+      frontal,
+      compareFaces(candidate, reference.profiles[yaw > 0 ? 0 : 1]),
+    );
   }
 
   double? _gyroYaw(
@@ -568,6 +599,7 @@ class ClassSweepVision {
     required int sensorOrientation,
     required DeviceOrientation deviceOrientation,
     DateTime? timestamp,
+    bool allowSweepPause = true,
   }) async {
     _check();
     _busy = true;
@@ -581,7 +613,7 @@ class ClassSweepVision {
       small = _small(bgr);
       final motion = _motion(small, at, deviceOrientation);
       _sweep ??= SweepChallenge();
-      final sweep = _sweep!.add(motion);
+      final sweep = _sweep!.add(motion, allowPause: allowSweepPause);
       final sceneFresh =
           _lastSceneAt == null ||
           at.difference(_lastSceneAt!).inMilliseconds >= 300;
@@ -647,7 +679,7 @@ class ClassSweepVision {
       );
       final yaw = faces.length == 1 ? faces.single.headEulerAngleY : null;
       final similarity = faces.length == 1
-          ? _similarity(_embedding(small))
+          ? _similarity(_embedding(small, liveFaceConfirmed: true), yaw)
           : null;
       final matches = similarity != null && similarity >= faceCosineThreshold;
       final progress = _head?.add(
@@ -655,6 +687,8 @@ class ClassSweepVision {
         yaw: yaw,
         identityMatches: matches,
         faceCount: faces.length,
+        trackingId: faces.length == 1 ? faces.single.trackingId : null,
+        identityObserved: similarity != null,
       );
       return SelfieFrameResult(
         faceCount: faces.length,
@@ -662,9 +696,98 @@ class ClassSweepVision {
         headYaw: yaw,
         identityMatches: matches,
         liveness: progress,
+        trackedFace: faces.length == 1 ? faces.single.trackingId : null,
       );
     } finally {
       small?.dispose();
+      bgr?.dispose();
+      _busy = false;
+    }
+  }
+
+  Future<EnrollmentFrame> enrollmentFrame(
+    CameraImage image, {
+    required int sensorOrientation,
+    required DeviceOrientation deviceOrientation,
+    required int pose,
+    required bool capture,
+    FaceReference? frontal,
+  }) async {
+    _check();
+    _busy = true;
+    cv.Mat? bgr;
+    try {
+      final rotation = frameRotation(
+        sensorOrientation,
+        deviceOrientation,
+        front: true,
+      );
+      final faces = await _faces.processImage(_mlImage(image, rotation));
+      if (faces.length != 1) {
+        return EnrollmentFrame(
+          faces.isEmpty
+              ? 'Position your face in the oval'
+              : 'Keep only one face in view',
+        );
+      }
+      final face = faces.single;
+      final portrait = rotation == 90 || rotation == 270;
+      final width = portrait ? image.height : image.width;
+      final height = portrait ? image.width : image.height;
+      final box = face.boundingBox;
+      if ((box.center.dx / width - .5).abs() > .19 ||
+          (box.center.dy / height - .5).abs() > .20) {
+        return const EnrollmentFrame('Center your face');
+      }
+      if (box.width / width < .29 || box.height / height < .26) {
+        return const EnrollmentFrame('Move a little closer');
+      }
+      if (box.width / width > .78 || box.height / height > .75) {
+        return const EnrollmentFrame('Move a little farther back');
+      }
+      final yaw = face.headEulerAngleY;
+      final tilted =
+          (face.headEulerAngleZ ?? 0).abs() > 14 ||
+          (face.headEulerAngleX ?? 0).abs() > 18;
+      if (yaw == null || tilted) {
+        return const EnrollmentFrame('Hold your head upright');
+      }
+      final directed = pose == 1 ? yaw : -yaw;
+      final good = pose == 0
+          ? yaw.abs() <= 11
+          : directed >= 15 && directed <= 31;
+      if (!good) {
+        return EnrollmentFrame(
+          pose == 0
+              ? 'Look straight ahead'
+              : directed > 31
+              ? 'Turn a little less'
+              : pose == 1
+              ? 'Turn slightly to your left'
+              : 'Turn slightly to your right',
+        );
+      }
+      if (!capture) {
+        return const EnrollmentFrame('Hold still', inPosition: true);
+      }
+      bgr = cameraBgr(image, rotation);
+      final sample = _embedding(bgr, liveFaceConfirmed: pose != 0);
+      if (sample == null) {
+        return const EnrollmentFrame('Improve the light and hold still');
+      }
+      if (frontal != null &&
+          compareFaces(frontal, sample) < faceCosineThreshold) {
+        return const EnrollmentFrame('Turn a little less and try again');
+      }
+      final (encoded, jpeg) = cv.imencode('.jpg', bgr);
+      if (!encoded) throw StateError('Could not save this frame');
+      return EnrollmentFrame(
+        'Captured',
+        inPosition: true,
+        sample: sample,
+        photo: jpeg,
+      );
+    } finally {
       bgr?.dispose();
       _busy = false;
     }

@@ -93,7 +93,7 @@ void main() {
         expect(s.progress.passed, isFalse);
         s.add(
           MotionSample(
-            timestamp: epoch.add(const Duration(seconds: 21)),
+            timestamp: epoch.add(const Duration(seconds: 46)),
             flowX: 0,
             flowY: 0,
             tracks: 0,
@@ -105,6 +105,30 @@ void main() {
       }
     },
   );
+  test('board codes are captured separately, with the second code gated by the sweep', () {
+    final scan = BoardCodeScan();
+    scan.observe(visible: ['0123'], stable: ['0123'], seekingSecond: false);
+    scan.observe(
+      visible: ['4567'],
+      stable: ['0123', '4567'],
+      seekingSecond: false,
+    );
+    expect(scan.first, '0123');
+    expect(scan.second, isNull);
+    scan.observe(
+      visible: ['0123'],
+      stable: ['0123', '4567'],
+      seekingSecond: true,
+    );
+    expect(scan.second, isNull);
+    scan.observe(
+      visible: ['4567'],
+      stable: ['0123', '4567'],
+      seekingSecond: true,
+    );
+    expect(scan.second, '4567');
+  });
+
   test('head challenge checks server direction, dwell, identity continuity and return', () {
     final h = HeadChallenge(direction: 'left');
     var t = 0;

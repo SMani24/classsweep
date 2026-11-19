@@ -68,7 +68,9 @@ class SceneReference {
 }
 
 class FaceReference {
-  FaceReference(List<double> values) : embedding = List.unmodifiable(values) {
+  FaceReference(List<double> values, {List<FaceReference> profiles = const []})
+    : embedding = List.unmodifiable(values),
+      profiles = List.unmodifiable(profiles) {
     if (embedding.length != 128 ||
         embedding.any((x) => !x.isFinite) ||
         embedding.every((x) => x == 0)) {
@@ -78,17 +80,28 @@ class FaceReference {
     }
   }
   final List<double> embedding;
+  final List<FaceReference> profiles;
+  FaceReference withProfiles(List<FaceReference> angles) =>
+      FaceReference(embedding, profiles: angles.take(2).toList());
   Map<String, dynamic> toJson() => {
     'version': 1,
     'model': 'sface-2021dec-int8',
     'embedding': embedding,
+    if (profiles.isNotEmpty)
+      'profiles': [for (final profile in profiles) profile.embedding],
   };
   factory FaceReference.fromJson(Map<String, dynamic> j) {
     if (j['model'] != 'sface-2021dec-int8' || j['version'] != 1) {
       throw const FormatException('Unsupported face reference');
     }
+    List<double> vector(Object? value) =>
+        (value as List).map((v) => (v as num).toDouble()).toList();
+    final angles = j['profiles'] as List? ?? const [];
     return FaceReference(
-      (j['embedding'] as List).map((v) => (v as num).toDouble()).toList(),
+      vector(j['embedding']),
+      profiles: [
+        for (final angle in angles.take(2)) FaceReference(vector(angle)),
+      ],
     );
   }
 }

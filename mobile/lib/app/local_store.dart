@@ -67,6 +67,22 @@ class LocalStore {
     }
   }
 
+  Future<void> saveEnrollmentAngles(
+    String scope,
+    Map<String, dynamic> angles,
+  ) => _storage.write(
+    key: 'angles_${_faceKey(scope)}',
+    value: jsonEncode(angles),
+  );
+
+  Future<Map<String, dynamic>?> loadEnrollmentAngles(String scope) async {
+    final value = await _storage.read(key: 'angles_${_faceKey(scope)}');
+    return value == null ? null : jsonDecode(value) as Map<String, dynamic>;
+  }
+
+  Future<void> clearEnrollmentAngles(String scope) =>
+      _storage.delete(key: 'angles_${_faceKey(scope)}');
+
   String _faceKey(String scope) => 'face_${sha256.convert(utf8.encode(scope))}';
   Future<void> clearFace(String scope) => _storage.delete(key: _faceKey(scope));
   Future<void> clearAccount() async {

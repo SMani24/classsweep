@@ -26,16 +26,14 @@ class PageProvider implements LocationProvider {
 class PageApi extends ClassSweepApi {
   PageApi() : super('http://localhost:8000');
   Map<String, dynamic>? body;
-  String? password, disabledId;
+  String? disabledId;
   List<Map<String, dynamic>> active = [];
   int creates = 0;
   @override
   Future<Map<String, dynamic>> createInstructorSession(
-    String password,
     Map<String, dynamic> body,
   ) async {
     creates++;
-    this.password = password;
     this.body = body;
     final session = <String, dynamic>{
       ...body,
@@ -49,17 +47,12 @@ class PageApi extends ClassSweepApi {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> instructorSessions(String password) async {
-    this.password = password;
+  Future<List<Map<String, dynamic>>> instructorSessions() async {
     return active;
   }
 
   @override
-  Future<Map<String, dynamic>> disableSessionGps(
-    String password,
-    String id,
-  ) async {
-    this.password = password;
+  Future<Map<String, dynamic>> disableSessionGps(String id) async {
     disabledId = id;
     return {
       'id': id,
@@ -151,42 +144,31 @@ void main() {
   }
 
   Future<void> fill(WidgetTester tester) async {
-    await reveal(tester, field('Instructor password'));
-    await tester.enterText(field('Instructor password'), 'instructor-secret');
     await reveal(tester, field('Session title'));
     await tester.enterText(field('Session title'), 'Test lecture');
     tester.testTextInput.hide();
   }
 
-  testWidgets('logged-out creation defaults GPS off and never samples', (
-    tester,
-  ) async {
-    await open(tester);
-    expect(model.session, isNull);
-    expect(provider.calls, 0);
-    await fill(tester);
-    await tapText(tester, 'Create attendance');
-    expect(api.creates, 1);
-    expect(api.body, {
-      'title': 'Test lecture',
-      'ttl_seconds': 300,
-      'gps': {'enabled': false},
-    });
-    expect(provider.calls, 0);
-    await reveal(tester, find.text('Code A: 1234'));
-    expect(find.text('Code A: 1234'), findsOneWidget);
-    expect(find.text('Code B: 5678'), findsOneWidget);
-    expect(api.password, 'instructor-secret');
-    // The password remains in the page for admin management after creation.
-    await reveal(tester, field('Instructor password'));
-    expect(
-      tester
-          .widget<TextFormField>(field('Instructor password'))
-          .controller!
-          .text,
-      'instructor-secret',
-    );
-  });
+  testWidgets(
+    'creating from instructor workspace defaults GPS off and never samples',
+    (tester) async {
+      await open(tester);
+      expect(model.session, isNull);
+      expect(provider.calls, 0);
+      await fill(tester);
+      await tapText(tester, 'Create attendance');
+      expect(api.creates, 1);
+      expect(api.body, {
+        'title': 'Test lecture',
+        'ttl_seconds': 300,
+        'gps': {'enabled': false},
+      });
+      expect(provider.calls, 0);
+      await reveal(tester, find.text('Code A: 1234'));
+      expect(find.text('Code A: 1234'), findsOneWidget);
+      expect(find.text('Code B: 5678'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'narrow screen toggles GPS without sampling, previews, changes radius, creates fresh and disables',
@@ -217,7 +199,6 @@ void main() {
       expect(find.text('Code A: 1234'), findsOneWidget);
       await tapText(tester, 'Disable GPS now');
       expect(api.disabledId, 'session-1');
-      expect(api.password, 'instructor-secret');
       expect(find.text('GPS off · no location required'), findsOneWidget);
       expect(provider.calls, 2);
       expect(tester.takeException(), isNull); // Includes overflow exceptions.

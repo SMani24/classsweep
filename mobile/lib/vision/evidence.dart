@@ -39,6 +39,27 @@ class CodeVoter {
   void reset() => _frames.clear();
 }
 
+/// Accept a stable code at each end of the guided sweep.
+class BoardCodeScan {
+  String? first, second;
+
+  void observe({
+    required List<String> visible,
+    required List<String> stable,
+    required bool seekingSecond,
+  }) {
+    final candidates = stable.where(visible.contains).toSet();
+    if (first == null && candidates.length == 1) {
+      first = candidates.single;
+    } else if (seekingSecond && second == null) {
+      candidates.remove(first);
+      if (candidates.length == 1) second = candidates.single;
+    }
+  }
+
+  bool contains(String code) => code == first || code == second;
+}
+
 double median(List<double> values) {
   if (values.isEmpty) return double.nan;
   final s = [...values]..sort();
@@ -117,12 +138,12 @@ class SweepChallenge {
   final List<double> _flow = [], _gyro = [];
   SweepProgress get progress =>
       SweepProgress(_phase, direction, correlation(_flow, _gyro), _flow.length);
-  SweepProgress add(MotionSample s) {
+  SweepProgress add(MotionSample s, {bool allowPause = true}) {
     if (_phase == SweepPhase.complete || _phase == SweepPhase.failed) {
       return progress;
     }
     _start ??= s.timestamp;
-    if (s.timestamp.difference(_start!) > const Duration(seconds: 20)) {
+    if (s.timestamp.difference(_start!) > const Duration(seconds: 45)) {
       _phase = SweepPhase.failed;
     }
     final gap = _last == null
@@ -130,7 +151,7 @@ class SweepChallenge {
         : s.timestamp.difference(_last!).inMilliseconds;
     if (gap <= 0 && _last != null) return progress;
     _last = s.timestamp;
-    if (gap > 600 && _phase != SweepPhase.failed) _phase = SweepPhase.first;
+
     if (!s.valid || s.gyroYaw == null || !s.gyroYaw!.isFinite || gap > 600) {
       _held = null;
       return progress;
@@ -145,7 +166,10 @@ class SweepChallenge {
         signedFlow.abs() > .025 && gyro.abs() > .06 && signedFlow * gyro > 0;
     final expected = _phase == SweepPhase.reverse ? -sign : sign;
     final ok = _phase == SweepPhase.pause
-        ? signedFlow.abs() < .012 && s.flowY.abs() < .012 && gyro.abs() < .04
+        ? allowPause &&
+              signedFlow.abs() < .012 &&
+              s.flowY.abs() < .012 &&
+              gyro.abs() < .04
         : moving && signedFlow * expected > 0;
     if (!ok) {
       _held = null;
@@ -187,37 +211,55 @@ class HeadChallenge {
   }
   final String direction;
   HeadPhase _phase = HeadPhase.center;
-  DateTime? _start, _held, _last;
+  DateTime? _start, _held, _last, _lastVerified;
+  int? _trackingId;
   LivenessProgress get progress => LivenessProgress(_phase, direction);
   LivenessProgress add({
     required DateTime at,
     required double? yaw,
     required bool identityMatches,
     required int faceCount,
+    int? trackingId,
+    bool identityObserved = true,
   }) {
     if (_phase == HeadPhase.failed || _phase == HeadPhase.complete) {
       return progress;
     }
     _start ??= at;
-    if (at.difference(_start!) > const Duration(seconds: 15)) {
+    if (at.difference(_start!) > const Duration(seconds: 30)) {
       _phase = HeadPhase.failed;
     }
     if (_last != null && !at.isAfter(_last!)) return progress;
-    if (_last != null && at.difference(_last!).inMilliseconds > 700) {
+    if (_phase == HeadPhase.failed) return progress;
+    if (_last != null && at.difference(_last!).inMilliseconds > 1200) {
       _held = null;
-      if (_phase != HeadPhase.failed) _phase = HeadPhase.center;
     }
     _last = at;
-    if (faceCount != 1 || !identityMatches || yaw == null || !yaw.isFinite) {
-      // Identity loss invalidates prior steps to prevent stitching different people.
+    final sameTrack =
+        _trackingId == null || trackingId == null || _trackingId == trackingId;
+    final lostTooLong =
+        _lastVerified != null &&
+        at.difference(_lastVerified!).inMilliseconds > 1400;
+    if (!sameTrack ||
+        faceCount > 1 ||
+        lostTooLong ||
+        (identityObserved && !identityMatches)) {
+      _trackingId = null;
+      _lastVerified = null;
+      _phase = HeadPhase.center;
       _held = null;
-      if (_phase != HeadPhase.failed) _phase = HeadPhase.center;
+    }
+    if (faceCount != 1 || !identityMatches || yaw == null || !yaw.isFinite) {
+      // A brief detection dropout pauses the dwell. It never counts toward a pose.
+      _held = null;
       return progress;
     }
+    _trackingId = trackingId ?? _trackingId;
+    _lastVerified = at;
     // ML Kit: positive yaw is face turning toward image right (subject left).
     final ok = _phase == HeadPhase.turn
-        ? yaw * (direction == 'left' ? 1 : -1) >= 18
-        : yaw.abs() <= 8;
+        ? yaw * (direction == 'left' ? 1 : -1) >= 17
+        : yaw.abs() <= 12;
     if (!ok) {
       _held = null;
       return progress;

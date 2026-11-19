@@ -13,8 +13,12 @@ class CameraPane extends StatefulWidget {
     required this.lens,
     this.onFrame,
     this.onInterrupted,
+    this.height = 340,
+    this.guide,
   });
   final CameraLensDirection lens;
+  final double height;
+  final Widget? guide;
   final Future<void> Function(
     CameraImage,
     CameraDescription,
@@ -167,6 +171,8 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Permission dialogs may briefly mark the foreground app inactive.
+    if (state == AppLifecycleState.inactive) return;
     if (state != AppLifecycleState.resumed) {
       if (!_active) return;
       _active = false;
@@ -174,7 +180,7 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
       widget.onInterrupted?.call();
       _operations = _operations.catchError((_) {}).then((_) => _release());
       if (mounted) setState(() {});
-    } else {
+    } else if (!_active) {
       _active = true;
       _queueOpen();
     }
@@ -197,7 +203,7 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
       child: ColoredBox(
         color: const Color(0xff102c3a),
         child: SizedBox(
-          height: 340,
+          height: widget.height,
           width: double.infinity,
           child: _error != null
               ? Center(
@@ -244,41 +250,13 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
                         aspectRatio: camera.value.aspectRatio > 1
                             ? 1 / camera.value.aspectRatio
                             : camera.value.aspectRatio,
-                        child: CameraPreview(camera),
-                      ),
-                    ),
-                    IgnorePointer(
-                      child: Container(
-                        margin: const EdgeInsets.all(36),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(
-                            widget.lens == CameraLensDirection.front ? 100 : 18,
-                          ),
-                          border: Border.all(color: Colors.white54, width: 2),
-                        ),
-                      ),
-                    ),
-                    const Positioned(
-                      left: 14,
-                      top: 14,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.all(Radius.circular(16)),
-                        ),
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          child: Text(
-                            'ON DEVICE',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              letterSpacing: 1.4,
-                            ),
-                          ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CameraPreview(camera),
+                            if (widget.guide != null)
+                              IgnorePointer(child: widget.guide!),
+                          ],
                         ),
                       ),
                     ),

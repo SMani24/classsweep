@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_model.dart';
 import 'account_pages.dart';
 import 'dashboard.dart';
+import 'instructor_home.dart';
 
 const navy = Color(0xff102e3e);
 const teal = Color(0xff087f8c);
@@ -123,6 +124,8 @@ class _ClassSweepAppState extends State<ClassSweepApp> {
         }
         return model.session == null
             ? AuthPage(model: model)
+            : model.user!.isInstructor
+            ? InstructorHome(model: model)
             : Dashboard(model: model);
       },
     ),
@@ -138,10 +141,10 @@ class PageBody extends StatelessWidget {
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 620),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(22, 16, 22, 36),
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 36),
         children: [
           for (final child in children)
-            Padding(padding: const EdgeInsets.only(bottom: 18), child: child),
+            Padding(padding: const EdgeInsets.only(bottom: 12), child: child),
         ],
       ),
     ),
@@ -160,11 +163,12 @@ class SectionTitle extends StatelessWidget {
         style: Theme.of(context).textTheme.headlineMedium
             ?.copyWith(fontWeight: FontWeight.w700, color: navy),
       ),
-      const SizedBox(height: 8),
-      Text(
-        subtitle,
-        style: const TextStyle(color: Color(0xff536e7a), height: 1.5),
-      ),
+      if (subtitle.isNotEmpty) const SizedBox(height: 8),
+      if (subtitle.isNotEmpty)
+        Text(
+          subtitle,
+          style: const TextStyle(color: Color(0xff536e7a), height: 1.5),
+        ),
     ],
   );
 }

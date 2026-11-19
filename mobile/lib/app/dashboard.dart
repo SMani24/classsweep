@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'account_pages.dart';
@@ -13,10 +15,35 @@ class Dashboard extends StatefulWidget {
   State<Dashboard> createState() => _DashboardState();
 }
 
-class _DashboardState extends State<Dashboard> {
+class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
+  Timer? _approvalPoll;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _approvalPoll = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (widget.model.user?.status == 'pending' &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        unawaited(widget.model.refresh());
+      }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(widget.model.refresh());
+  }
+
+  @override
+  void dispose() {
+    _approvalPoll?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   int _tab = 0;
   bool _signingOut = false;
-  Future<void> _capture([Map<String, dynamic>? session]) async {
+  Future<void> _capture(Map<String, dynamic> session) async {
     await Navigator.push(
       context,
       MaterialPageRoute<void>(
@@ -30,7 +57,12 @@ class _DashboardState extends State<Dashboard> {
   Widget build(BuildContext context) {
     final model = widget.model, user = widget.model.user!;
     final status = switch (user.status) {
-      'approved' => 'Approved',
+      'approved' =>
+        model.faceReference != null
+            ? 'Ready to check in'
+            : model.preparingFace
+            ? 'Preparing face check'
+            : 'Face setup needs attention',
       'pending' => 'Awaiting review',
       'rejected' => 'Photo rejected',
       _ => 'Enrollment needed',
@@ -84,50 +116,15 @@ class _DashboardState extends State<Dashboard> {
             if (model.refreshing) const LinearProgressIndicator(),
             if (model.refreshError != null) ErrorNotice(model.refreshError!),
             if (_tab == 0) ...[
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: navy,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'YOUR CLASSROOM, VERIFIED',
-                      style: TextStyle(
-                        color: Color(0xff65ddd0),
-                        fontSize: 11,
-                        letterSpacing: 1.6,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Hello, ${user.name}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      status,
-                      style: const TextStyle(color: Color(0xffbed4de)),
-                    ),
-                  ],
-                ),
-              ),
-              _enrollment(status),
-              const SectionTitle(
-                'Open sessions',
-                'Choose your class, then scan the board’s two codes.',
-              ),
+              SectionTitle('Check in', ''),
+              if (!user.approved || model.faceReference == null)
+                _enrollment(status),
+              const SectionTitle('Open sessions', ''),
               if (model.sessions.isEmpty)
                 const InfoCard(
                   icon: Icons.event_available_outlined,
                   title: 'No open sessions',
-                  body: 'Your instructor creates a session in the web dashboard. Pull down to refresh when the board codes appear.',
+                  body: 'Pull down to refresh.',
                 ),
               for (final session in model.sessions)
                 Card(
@@ -154,7 +151,10 @@ class _DashboardState extends State<Dashboard> {
                         ),
                         const SizedBox(height: 14),
                         FilledButton.icon(
-                          onPressed: user.approved && !model.refreshing
+                          onPressed:
+                              user.approved &&
+                                  model.faceReference != null &&
+                                  !model.refreshing
                               ? () => _capture(session)
                               : null,
                           icon: const Icon(Icons.document_scanner_outlined),
@@ -164,22 +164,14 @@ class _DashboardState extends State<Dashboard> {
                     ),
                   ),
                 ),
-              const InfoCard(
-                icon: Icons.phonelink_lock_rounded,
-                title: 'Checks on your phone',
-                body: 'Scan the board and match your enrolled face. If the instructor enables GPS, your phone also checks your distance from the classroom. Student coordinates stay on this phone; only processed results leave it.',
-              ),
             ],
             if (_tab == 1) ...[
-              const SectionTitle(
-                'Your attendance',
-                'Confirmed records from your classroom server.',
-              ),
+              const SectionTitle('Your attendance', ''),
               if (model.records.isEmpty)
                 const InfoCard(
                   icon: Icons.receipt_long_outlined,
                   title: 'No recorded attendance yet',
-                  body: 'A record appears here only after the server accepts a completed check-in.',
+                  body: '',
                 ),
               for (final record in model.records)
                 Card(
@@ -207,11 +199,6 @@ class _DashboardState extends State<Dashboard> {
                 icon: Icons.dns_outlined,
                 title: 'Connected server',
                 body: model.serverUrl,
-              ),
-              const InfoCard(
-                icon: Icons.science_outlined,
-                title: 'Experimental on-device checks',
-                body: 'Camera, gyro and matching thresholds require validation on your Android phone. Head movement alone is not strong anti-spoof protection.',
               ),
               OutlinedButton.icon(
                 onPressed: _signingOut
@@ -258,19 +245,16 @@ class _DashboardState extends State<Dashboard> {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            Text(switch (user.status) {
-              'approved' => 'Prepare the approved face reference on this phone before the instructor purges the original photo.',
-              'pending' => 'Your instructor is reviewing your one-time photo. Tap refresh after approval.',
-              'rejected' => 'Take a new clear photo with one unobstructed face, then submit it for review.',
-              _ => 'Upload a single photo for instructor review before your first check-in.',
-            }, style: const TextStyle(height: 1.5, color: Color(0xff536e7a))),
-            if (user.approved) ...[
-              const SizedBox(height: 14),
-              OutlinedButton.icon(
-                onPressed: () => _capture(),
-                icon: const Icon(Icons.download_done_outlined),
-                label: const Text('Prepare on this phone'),
+            if (widget.model.preparingFace) ...[
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+            ],
+            if (widget.model.facePreparationError != null) ...[
+              const SizedBox(height: 8),
+              Text(widget.model.facePreparationError!),
+              TextButton(
+                onPressed: widget.model.ensureFace,
+                child: const Text('Retry face setup'),
               ),
             ],
             if (user.status == 'none' || user.status == 'rejected') ...[

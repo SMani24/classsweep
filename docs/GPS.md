@@ -4,7 +4,7 @@ GPS is an extra location-consistency check, alongside the existing camera checks
 
 ## Instructor setup on the phone
 
-Open **Settings → Instructor attendance & GPS**, or **Instructor · Attendance settings** from the sign-in screen. Enter the administrator password, session title and duration. Calibrate the classroom first if no room reference exists.
+On the instructor phone, use **Instructor sign-in** once with the dashboard password. Open **Attendance sessions** from the instructor workspace and enter a title and duration. Calibrate the classroom first if no room reference exists.
 
 - Leave **Require GPS** off to use only the camera checks. The app does not request a location or location permission for that session.
 - Turn it on to use the instructor phone's current position as the session center.

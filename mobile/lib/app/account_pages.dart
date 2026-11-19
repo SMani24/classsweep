@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../network/api_client.dart';
@@ -18,7 +20,7 @@ class _AuthPageState extends State<AuthPage> {
   final _name = TextEditingController(),
       _id = TextEditingController(),
       _password = TextEditingController();
-  bool _register = false, _busy = false, _obscure = true;
+  bool _instructor = false, _register = false, _busy = false, _obscure = true;
   String? _error;
   @override
   void dispose() {
@@ -38,7 +40,8 @@ class _AuthPageState extends State<AuthPage> {
     try {
       await widget.model.authenticate(
         register: _register,
-        username: _id.text.trim(),
+        instructor: _instructor,
+        username: _instructor ? 'admin' : _id.text.trim(),
         password: _password.text,
         name: _name.text.trim(),
       );
@@ -77,47 +80,24 @@ class _AuthPageState extends State<AuthPage> {
         key: _form,
         child: PageBody(
           children: [
-            Container(
-              padding: const EdgeInsets.all(26),
-              decoration: BoxDecoration(
-                color: navy,
-                borderRadius: BorderRadius.circular(26),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.radar_rounded, color: Color(0xff65ddd0), size: 42),
-                  SizedBox(height: 20),
-                  Text(
-                    'Be here.\nCheck in securely.',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 32,
-                      height: 1.15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  SizedBox(height: 14),
-                  Text(
-                    'Classroom and identity checks happen on your phone.',
-                    style: TextStyle(color: Color(0xffbed4de), height: 1.5),
-                  ),
+            SectionTitle(
+              _instructor ? 'Instructor sign-in' : 'Student access',
+              '',
+            ),
+            if (!_instructor)
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('Sign in')),
+                  ButtonSegment(value: true, label: Text('Create account')),
                 ],
+                selected: {_register},
+                onSelectionChanged: _busy
+                    ? null
+                    : (v) => setState(() {
+                        _register = v.first;
+                        _error = null;
+                      }),
               ),
-            ),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('Sign in')),
-                ButtonSegment(value: true, label: Text('Create account')),
-              ],
-              selected: {_register},
-              onSelectionChanged: _busy
-                  ? null
-                  : (v) => setState(() {
-                      _register = v.first;
-                      _error = null;
-                    }),
-            ),
             if (_register)
               TextFormField(
                 controller: _name,
@@ -132,20 +112,21 @@ class _AuthPageState extends State<AuthPage> {
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Enter your name.' : null,
               ),
-            TextFormField(
-              controller: _id,
-              enabled: !_busy,
-              autocorrect: false,
-              autofillHints: const [AutofillHints.username],
-              decoration: const InputDecoration(
-                labelText: 'Student ID',
-                prefixIcon: Icon(Icons.badge_outlined),
+            if (!_instructor)
+              TextFormField(
+                controller: _id,
+                enabled: !_busy,
+                autocorrect: false,
+                autofillHints: const [AutofillHints.username],
+                decoration: const InputDecoration(
+                  labelText: 'Student ID',
+                  prefixIcon: Icon(Icons.badge_outlined),
+                ),
+                validator: (v) =>
+                    RegExp(r'^[a-zA-Z0-9_.-]{3,64}$').hasMatch(v?.trim() ?? '')
+                    ? null
+                    : 'Use 3–64 letters or digits, . _ -',
               ),
-              validator: (v) =>
-                  RegExp(r'^[a-zA-Z0-9_.-]{3,64}$').hasMatch(v?.trim() ?? '')
-                  ? null
-                  : 'Use 3–64 letters, digits, dots, underscores or hyphens.',
-            ),
             TextFormField(
               controller: _password,
               enabled: !_busy,
@@ -169,13 +150,31 @@ class _AuthPageState extends State<AuthPage> {
               ),
               validator: (v) => v == null || v.isEmpty
                   ? 'Enter your password.'
-                  : _register && (v.length < 10 || v.length > 256)
-                  ? 'Use 10–256 characters.'
+                  : _register && (v.runes.length < 8 || v.runes.length > 256)
+                  ? 'Use 8–256 characters.'
                   : null,
               onFieldSubmitted: (_) {
                 if (!_busy) _submit();
               },
             ),
+            if (_register)
+              OutlinedButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () {
+                        final random = Random.secure();
+                        const alphabet =
+                            'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%+-_=';
+                        setState(
+                          () => _password.text = List.generate(
+                            20,
+                            (_) => alphabet[random.nextInt(alphabet.length)],
+                          ).join(),
+                        );
+                      },
+                icon: const Icon(Icons.password),
+                label: const Text('Suggest strong password'),
+              ),
             if (_error != null) ErrorNotice(_error!),
             FilledButton(
               onPressed: _busy ? null : _submit,
@@ -187,40 +186,18 @@ class _AuthPageState extends State<AuthPage> {
                     : 'Sign in',
               ),
             ),
-            if (_register)
-              const Text(
-                'Your account will be bound to this installation’s random device ID. Enrollment approval is required before attendance.',
-                style: TextStyle(color: Color(0xff536e7a), height: 1.5),
+            TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _instructor = !_instructor;
+                      _register = false;
+                      _error = null;
+                      _password.clear();
+                    }),
+              child: Text(
+                _instructor ? 'Student access' : 'Instructor sign-in',
               ),
-            Text(
-              'Server · ${widget.model.serverUrl}',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            TextButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => InstructorPage(model: widget.model),
-                      ),
-                    ),
-              icon: const Icon(Icons.event_note_outlined),
-              label: const Text('Instructor · Attendance settings'),
-            ),
-            TextButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) =>
-                            PhotoPage(model: widget.model, calibration: true),
-                      ),
-                    ),
-              icon: const Icon(Icons.meeting_room_outlined),
-              label: const Text('Instructor · Calibrate classroom'),
             ),
           ],
         ),
@@ -351,31 +328,33 @@ class _SettingsPageState extends State<SettingsPage> {
           'Device binding · ${widget.model.deviceId.isEmpty ? 'Unavailable' : widget.model.deviceId.substring(0, 12)}…',
           style: Theme.of(context).textTheme.bodySmall,
         ),
-        OutlinedButton.icon(
-          onPressed: _busy
-              ? null
-              : () => Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        PhotoPage(model: widget.model, calibration: true),
+        if (widget.model.user?.isInstructor == true)
+          OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          PhotoPage(model: widget.model, calibration: true),
+                    ),
                   ),
-                ),
-          icon: const Icon(Icons.meeting_room_outlined),
-          label: const Text('Instructor calibration'),
-        ),
-        OutlinedButton.icon(
-          onPressed: _busy || _testing
-              ? null
-              : () => Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => InstructorPage(model: widget.model),
+            icon: const Icon(Icons.meeting_room_outlined),
+            label: const Text('Instructor calibration'),
+          ),
+        if (widget.model.user?.isInstructor == true)
+          OutlinedButton.icon(
+            onPressed: _busy || _testing
+                ? null
+                : () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => InstructorPage(model: widget.model),
+                    ),
                   ),
-                ),
-          icon: const Icon(Icons.event_note_outlined),
-          label: const Text('Instructor attendance & GPS'),
-        ),
+            icon: const Icon(Icons.event_note_outlined),
+            label: const Text('Instructor attendance & GPS'),
+          ),
       ],
     ),
   );

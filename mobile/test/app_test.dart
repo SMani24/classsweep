@@ -24,7 +24,7 @@ class MemoryStore extends LocalStore {
 }
 
 void main() {
-  test('instructor GPS creation and disable use admin auth and CSRF, not student tokens', () async {
+  test('instructor session controls use the saved bearer credential', () async {
     final paths = <String>[];
     final body = {
       'title': 'Synthetic GPS session',
@@ -40,19 +40,13 @@ void main() {
     };
     final api = ClassSweepApi(
       'http://laptop.local:8000',
-      token: 'student-token-must-not-be-used',
+      token: 'synthetic-instructor-token',
       client: MockClient((request) async {
         paths.add(request.url.path);
         expect(
           request.headers['Authorization'],
-          'Basic ${base64Encode(utf8.encode('admin:synthetic-password'))}',
+          'Bearer synthetic-instructor-token',
         );
-        if (request.url.path == '/admin/csrf') {
-          return http.Response('{"csrf_token":"synthetic-csrf"}', 200);
-        }
-        if (request.method == 'POST') {
-          expect(request.headers['X-CSRF-Token'], 'synthetic-csrf');
-        }
         if (request.url.path == '/admin/sessions' && request.method == 'POST') {
           expect(jsonDecode(request.body), body);
           return http.Response(
@@ -71,20 +65,14 @@ void main() {
         return http.Response('{"id":"session-1","gps":{"enabled":false}}', 200);
       }),
     );
-    expect(
-      (await api.createInstructorSession('synthetic-password', body))['id'],
-      'session-1',
-    );
-    expect((await api.instructorSessions('synthetic-password')).length, 1);
-    expect(
-      (await api.disableSessionGps('synthetic-password', 'session-1'))['gps'],
-      {'enabled': false},
-    );
+    expect((await api.createInstructorSession(body))['id'], 'session-1');
+    expect((await api.instructorSessions()).length, 1);
+    expect((await api.disableSessionGps('session-1'))['gps'], {
+      'enabled': false,
+    });
     expect(paths, [
-      '/admin/csrf',
       '/admin/sessions',
       '/admin/sessions',
-      '/admin/csrf',
       '/admin/sessions/session-1/gps/disable',
     ]);
     api.close();
@@ -287,7 +275,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Be here.\nCheck in securely.'), findsOneWidget);
+        expect(find.text('Student access'), findsOneWidget);
         expect(tester.takeException(), isNull);
         if (const bool.fromEnvironment('CAPTURE_PREVIEW') && width == 390) {
           await tester.runAsync(() async {
@@ -314,6 +302,14 @@ void main() {
         await tester.tap(register);
         await tester.pumpAndSettle();
         expect(find.widgetWithText(TextFormField, 'Full name'), findsOneWidget);
+        final suggest = find.text('Suggest strong password');
+        await tester.ensureVisible(suggest);
+        await tester.tap(suggest);
+        await tester.pumpAndSettle();
+        final field = tester.widget<TextFormField>(
+          find.widgetWithText(TextFormField, 'Password'),
+        );
+        expect(field.controller?.text.length, 20);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         model.dispose();

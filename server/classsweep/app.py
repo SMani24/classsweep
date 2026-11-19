@@ -95,8 +95,32 @@ def create_app():
                            expose_headers=["X-Reference-SHA256", "X-Device-ID"])
     app.add_middleware(BodyLimitMiddleware)
 
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        # Never echo submitted coordinates or other private input in error bodies.
+        return JSONResponse({"detail": "Invalid request fields or values"}, status_code=422)
+
     def now():
         return app.state.now()
+
+    def fresh_capture(captured_at, timestamp):
+        return timestamp - 60 <= captured_at <= timestamp + 15
+
+    def live_gps(session):
+        return {"enabled": False} if session["gps_disabled_at"] is not None else json.loads(session["gps_json"])
+
+    def public_session(session, admin_view=False):
+        fields = ("id", "title", "expires_at", "classroom_reference_id")
+        if admin_view:
+            fields += ("code_a", "code_b", "created_at")
+        return {**{key: session[key] for key in fields}, "gps": live_gps(session)}
+
+    def gps_result_fields(stored):
+        gps = json.loads(stored)
+        result = {"gps_status": gps["status"]}
+        if gps["status"] == "passed":
+            result["location"] = {"distance_m": gps["distance_m"], "accuracy_m": gps["accuracy_m"]}
+        return result
 
     def admin(credentials: HTTPBasicCredentials | None = Depends(basic)):
         if (credentials is None or not hmac.compare_digest(credentials.username.encode(), b"admin")
@@ -269,7 +293,17 @@ def create_app():
     @app.get("/api/sessions")
     def active_sessions(user=Depends(current_user)):
         with db.connect() as conn:
-            return [dict(row) for row in conn.execute("SELECT id,title,expires_at,classroom_reference_id FROM sessions WHERE expires_at>? ORDER BY created_at DESC", (now(),))]
+            return [public_session(row) for row in conn.execute("SELECT * FROM sessions WHERE expires_at>? ORDER BY created_at DESC", (now(),))]
+
+    @app.get("/api/sessions/{session_id}")
+    def session_policy(session_id: str, user=Depends(current_user)):
+        with db.connect() as conn:
+            row = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if row is None:
+                raise HTTPException(404, "Session not found")
+            if row["expires_at"] <= now():
+                raise HTTPException(410, "Session expired")
+            return public_session(row)
 
     @app.post("/api/attempts", status_code=201)
     def attempt(body: AttemptCreate, user=Depends(current_user)):
@@ -296,7 +330,7 @@ def create_app():
         error = None
         result = None
         with db.connect(write=True) as conn:
-            row = conn.execute("SELECT a.*,s.expires_at AS session_expires,s.classroom_reference_id FROM attempts a JOIN sessions s ON s.id=a.session_id WHERE a.id=? AND a.user_id=?", (body.attempt_id, user["id"])).fetchone()
+            row = conn.execute("SELECT a.*,s.expires_at AS session_expires,s.classroom_reference_id,s.gps_json,s.gps_disabled_at FROM attempts a JOIN sessions s ON s.id=a.session_id WHERE a.id=? AND a.user_id=?", (body.attempt_id, user["id"])).fetchone()
             if row is None:
                 raise HTTPException(404, "Unknown attempt")
             if row["consumed_at"] is not None:
@@ -313,13 +347,27 @@ def create_app():
                                   or body.direction != row["direction"] or body.classroom_reference_id != row["classroom_reference_id"]
                                   or not all(body.checks.model_dump().values())):
                     error = (403, "Challenge, device, reference or local checks did not match")
+                gps_result = {"status": "disabled"}
                 if not error:
-                    result = {"id": secrets.token_urlsafe(18), "session_id": row["session_id"], "recorded_at": now()}
+                    policy = live_gps(row)
+                    if policy["enabled"]:
+                        location = body.location
+                        if (location is None or not 0 <= location.distance_m <= policy["radius_m"]
+                                or not 0 <= location.accuracy_m <= min(policy["radius_m"] / 2, 100)
+                                or not fresh_capture(location.captured_at, now())):
+                            error = (403, "Fresh, accurate GPS summary inside session radius required")
+                        else:
+                            gps_result = {"status": "passed", "distance_m": location.distance_m,
+                                          "accuracy_m": location.accuracy_m}
+                if not error:
+                    gps_json = json.dumps(gps_result, allow_nan=False)
+                    result = {"id": secrets.token_urlsafe(18), "session_id": row["session_id"], "recorded_at": now(),
+                              **gps_result_fields(gps_json)}
                     try:
-                        conn.execute("INSERT INTO attendance VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                        conn.execute("INSERT INTO attendance (id,user_id,session_id,attempt_id,device_id,reference_sha256,classroom_reference_id,direction,checks,metrics,recorded_at,gps_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                                      (result["id"], user["id"], row["session_id"], row["id"], body.device_id,
                                       body.reference_sha256, body.classroom_reference_id, body.direction,
-                                      body.checks.model_dump_json(), body.metrics.model_dump_json(), result["recorded_at"]))
+                                      body.checks.model_dump_json(), body.metrics.model_dump_json(), result["recorded_at"], gps_json))
                     except sqlite3.IntegrityError:
                         error = (409, "Attendance already recorded")
         if error:
@@ -329,7 +377,9 @@ def create_app():
     @app.get("/api/attendance")
     def own_attendance(user=Depends(current_user)):
         with db.connect() as conn:
-            return [dict(row) for row in conn.execute("SELECT a.id,a.session_id,s.title,a.recorded_at FROM attendance a JOIN sessions s ON s.id=a.session_id WHERE a.user_id=? ORDER BY a.recorded_at DESC", (user["id"],))]
+            rows = conn.execute("SELECT a.id,a.session_id,s.title,a.recorded_at,a.gps_json FROM attendance a JOIN sessions s ON s.id=a.session_id WHERE a.user_id=? ORDER BY a.recorded_at DESC", (user["id"],)).fetchall()
+            return [{**{key: row[key] for key in ("id", "session_id", "title", "recorded_at")},
+                     **gps_result_fields(row["gps_json"])} for row in rows]
 
     @app.get("/admin/csrf", dependencies=[Depends(admin)])
     def get_csrf():
@@ -337,6 +387,8 @@ def create_app():
 
     def create_session(body):
         with db.connect(write=True) as conn:
+            if body.gps.enabled and not fresh_capture(body.gps.captured_at, now()):
+                raise HTTPException(422, "GPS center capture must be fresh (60s past, 15s future)")
             room = conn.execute("SELECT value FROM settings WHERE key='classroom'").fetchone()
             if room is None:
                 raise HTTPException(409, "Calibrate classroom from instructor phone first")
@@ -349,8 +401,9 @@ def create_app():
             available.remove(a)
             b = secrets.choice(available)
             result = {"id": secrets.token_urlsafe(18), "title": body.title, "code_a": a, "code_b": b,
-                      "expires_at": now() + body.ttl_seconds, "classroom_reference_id": room["value"]}
-            conn.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?)", (result["id"], body.title, a, b, now(), result["expires_at"], room["value"]))
+                      "expires_at": now() + body.ttl_seconds, "classroom_reference_id": room["value"],
+                      "gps": body.gps.model_dump()}
+            conn.execute("INSERT INTO sessions (id,title,code_a,code_b,created_at,expires_at,classroom_reference_id,gps_json) VALUES (?,?,?,?,?,?,?,?)", (result["id"], body.title, a, b, now(), result["expires_at"], room["value"], body.gps.model_dump_json()))
         return result
 
     @app.post("/admin/sessions", status_code=201, dependencies=[Depends(admin_write)])
@@ -370,7 +423,20 @@ def create_app():
     @app.get("/admin/sessions", dependencies=[Depends(admin)])
     def all_sessions():
         with db.connect() as conn:
-            return [dict(row) for row in conn.execute("SELECT * FROM sessions ORDER BY created_at DESC")]
+            return [public_session(row, admin_view=True) for row in conn.execute("SELECT * FROM sessions ORDER BY created_at DESC")]
+
+    @app.post("/admin/sessions/{session_id}/gps/disable", dependencies=[Depends(admin_write)])
+    def disable_gps(session_id: str, request: Request):
+        with db.connect(write=True) as conn:
+            session = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if session is None:
+                raise HTTPException(404, "Session not found")
+            if session["expires_at"] <= now():
+                raise HTTPException(410, "Session expired")
+            conn.execute("UPDATE sessions SET gps_disabled_at=COALESCE(gps_disabled_at,?) WHERE id=?", (now(), session_id))
+        if request.headers.get("content-type", "").startswith("application/x-www-form-urlencoded"):
+            return RedirectResponse("/admin", status_code=303)
+        return {"id": session_id, "gps": {"enabled": False}}
 
     @app.get("/admin/enrollments/{user_id}/image", dependencies=[Depends(admin)])
     def admin_image(user_id: str):
@@ -413,13 +479,15 @@ def create_app():
         with db.connect() as conn:
             if not conn.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone():
                 raise HTTPException(404, "Session not found")
-            rows = conn.execute("SELECT u.username,u.display_name,a.recorded_at,a.device_id,a.reference_sha256,a.classroom_reference_id,a.direction,a.metrics FROM attendance a JOIN users u ON u.id=a.user_id WHERE a.session_id=? ORDER BY a.recorded_at", (session_id,)).fetchall()
+            rows = conn.execute("SELECT u.username,u.display_name,a.recorded_at,a.device_id,a.reference_sha256,a.classroom_reference_id,a.direction,a.metrics,a.gps_json FROM attendance a JOIN users u ON u.id=a.user_id WHERE a.session_id=? ORDER BY a.recorded_at", (session_id,)).fetchall()
         output = io.StringIO(newline="")
         writer = csv.writer(output)
-        writer.writerow(["username", "display_name", "recorded_at_utc_unix", "device_id", "reference_sha256", "classroom_reference_id", "direction", "metrics_json"])
+        writer.writerow(["username", "display_name", "recorded_at_utc_unix", "device_id", "reference_sha256", "classroom_reference_id", "direction", "metrics_json", "gps_status", "gps_distance_m", "gps_accuracy_m"])
         for row in rows:
+            gps = json.loads(row["gps_json"])
+            values = list(row)[:-1] + [gps["status"], gps.get("distance_m", ""), gps.get("accuracy_m", "")]
             # Spreadsheet formula injection protection on user-controlled string cells.
-            writer.writerow([("'" + v if isinstance(v, str) and v.lstrip().startswith(("=", "+", "-", "@")) else v) for v in row])
+            writer.writerow([("'" + v if isinstance(v, str) and v.lstrip().startswith(("=", "+", "-", "@")) else v) for v in values])
         return Response(output.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="classsweep-results.csv"'})
 
     @app.get("/", response_class=HTMLResponse)
@@ -447,13 +515,20 @@ def create_app():
             forms = "".join(f'<form method="post" action="/admin/enrollments/{uid}/{action}"><input type="hidden" name="csrf_token" value="{csrf}"><button>{label}</button></form>' for action, label in actions)
             image = f'<a href="/admin/enrollments/{uid}/image"><img alt="Enrollment reference" src="/admin/enrollments/{uid}/image" width="140"></a>' if row["available"] else "No retained image"
             rows.append(f'<tr><td>{e(row["display_name"])}<br>{e(row["username"])}</td><td>{e(row["status"] or "none")}<br><small>{e(row["sha256"] or "")}</small></td><td>{image}</td><td>{forms}</td></tr>')
-        session_rows = "".join(f'<tr><td>{e(s["title"])}</td><td class="codes">{e(s["code_a"])} &nbsp; {e(s["code_b"])}</td><td>{"Open" if s["expires_at"] > now() else "Expired"}<br>{max(0,int(s["expires_at"]-now()))}s left</td><td>{s["total"]} <a href="/admin/sessions/{e(s["id"])}/results.csv">CSV</a></td></tr>' for s in sessions)
+        session_rows = []
+        for s in sessions:
+            gps = live_gps(s)
+            gps_label = f'GPS on · {gps["radius_m"]:g} m radius' if gps["enabled"] else "GPS off"
+            disable_form = ""
+            if gps["enabled"] and s["expires_at"] > now():
+                disable_form = f'<form method="post" action="/admin/sessions/{e(s["id"], quote=True)}/gps/disable"><input type="hidden" name="csrf_token" value="{csrf}"><button>Disable GPS</button></form>'
+            session_rows.append(f'<tr><td>{e(s["title"])}</td><td class="codes">{e(s["code_a"])} &nbsp; {e(s["code_b"])}</td><td>{"Open" if s["expires_at"] > now() else "Expired"}<br>{max(0,int(s["expires_at"]-now()))}s left</td><td>{gps_label}{disable_form}</td><td>{s["total"]} <a href="/admin/sessions/{e(s["id"])}/results.csv">CSV</a></td></tr>')
         room_name = e(json.loads(room["payload"])["name"]) if room else "Not calibrated — use instructor phone to upload processed ORB descriptors."
         return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ClassSweep instructor</title>
 <style>body{{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem;background:#f5f7fa;color:#172436}}table{{border-collapse:collapse;width:100%;background:white}}td,th{{padding:12px;text-align:left;border-bottom:1px solid #ddd}}small{{overflow-wrap:anywhere}}button,input{{padding:9px;margin:4px}}form{{display:inline-block}}.codes{{font-size:2rem;font-weight:bold;white-space:nowrap}}img{{max-height:160px;object-fit:contain}}</style>
 <h1>ClassSweep instructor</h1><p>Room: {room_name}</p><p><a href="/admin">Refresh dashboard</a>. Approval binds the exact image to the registered device. Purge images only after phone template provisioning; revoke separately to remove enrollment.</p>
 <h2>Create session</h2><form method="post" action="/admin/sessions/create"><input type="hidden" name="csrf_token" value="{csrf}"><input name="title" required maxlength="150" placeholder="Lecture title"><label>TTL seconds <input name="ttl_seconds" type="number" min="30" max="1800" value="300" required></label><button>Create fresh codes</button></form>
-<h2>Sessions</h2><table><tr><th>Title</th><th>Board codes A / B</th><th>Status</th><th>Results</th></tr>{session_rows}</table>
+<h2>Sessions</h2><table><tr><th>Title</th><th>Board codes A / B</th><th>Status</th><th>GPS</th><th>Results</th></tr>{''.join(session_rows)}</table>
 <h2>Enrollment review</h2><table><tr><th>Account</th><th>Status / exact SHA-256</th><th>Reference image</th><th>Actions</th></tr>{''.join(rows)}</table><p>Routine attendance contains local checks and metrics only. These client claims are not independent proof of presence. HTTP Basic credentials remain cached by the browser; close the private browser session when finished.</p></html>'''
 
     return app

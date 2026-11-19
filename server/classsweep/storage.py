@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
  id TEXT PRIMARY KEY, title TEXT NOT NULL, code_a TEXT UNIQUE NOT NULL,
  code_b TEXT UNIQUE NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL,
- classroom_reference_id TEXT NOT NULL REFERENCES classroom_refs(id)
+ classroom_reference_id TEXT NOT NULL REFERENCES classroom_refs(id),
+ gps_json TEXT NOT NULL DEFAULT '{"enabled":false}', gps_disabled_at REAL
 );
 CREATE TABLE IF NOT EXISTS attempts (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS attendance (
  device_id TEXT NOT NULL, reference_sha256 TEXT NOT NULL,
  classroom_reference_id TEXT NOT NULL REFERENCES classroom_refs(id),
  direction TEXT NOT NULL, checks TEXT NOT NULL, metrics TEXT NOT NULL, recorded_at REAL NOT NULL,
+ gps_json TEXT NOT NULL DEFAULT '{"status":"disabled"}',
  UNIQUE(user_id,session_id)
 );
 CREATE TABLE IF NOT EXISTS csrf_tokens (token_hash TEXT PRIMARY KEY, expires_at REAL NOT NULL);
@@ -52,6 +54,15 @@ class Database:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            # Additive and idempotent: preserve pre-GPS users, sessions and results.
+            session_columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)")}
+            if "gps_json" not in session_columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN gps_json TEXT NOT NULL DEFAULT '{\"enabled\":false}'")
+            if "gps_disabled_at" not in session_columns:
+                db.execute("ALTER TABLE sessions ADD COLUMN gps_disabled_at REAL")
+            attendance_columns = {row["name"] for row in db.execute("PRAGMA table_info(attendance)")}
+            if "gps_json" not in attendance_columns:
+                db.execute("ALTER TABLE attendance ADD COLUMN gps_json TEXT NOT NULL DEFAULT '{\"status\":\"disabled\"}'")
 
     @contextmanager
     def connect(self, write=False):

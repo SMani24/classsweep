@@ -33,9 +33,38 @@ class Login(Model):
     password: Annotated[str, Field(min_length=1, max_length=256)]
 
 
+class GPSPolicy(Model):
+    @model_validator(mode="before")
+    @classmethod
+    def literal_boolean(cls, value):
+        if isinstance(value, dict) and "enabled" in value and type(value["enabled"]) is not bool:
+            raise ValueError("enabled must be a boolean")
+        return value
+
+
+class GPSDisabled(GPSPolicy):
+    enabled: Literal[False] = False
+
+
+class GPSEnabled(GPSPolicy):
+    enabled: Literal[True]
+    latitude: Annotated[float, Field(ge=-90, le=90)]
+    longitude: Annotated[float, Field(ge=-180, le=180)]
+    accuracy_m: Annotated[float, Field(ge=0)]
+    captured_at: float
+    radius_m: Annotated[float, Field(ge=25, le=1000)] = 100.0
+
+    @model_validator(mode="after")
+    def accurate_center(self):
+        if self.accuracy_m > min(self.radius_m / 2, 100):
+            raise ValueError("GPS center accuracy exceeds allowed limit")
+        return self
+
+
 class SessionCreate(Model):
     title: Annotated[str, Field(min_length=1, max_length=150)]
     ttl_seconds: Annotated[StrictInt, Field(ge=30, le=1800)] = 300
+    gps: Annotated[GPSDisabled | GPSEnabled, Field(discriminator="enabled")] = Field(default_factory=GPSDisabled)
 
     @field_validator("title")
     @classmethod
@@ -78,6 +107,13 @@ class Metrics(Model):
     motion_correlation: Annotated[float, Field(ge=-1, le=1)]
 
 
+class LocationSummary(Model):
+    # Bounds depend on the session's live policy; disabled sessions discard this.
+    distance_m: float
+    accuracy_m: float
+    captured_at: float
+
+
 class AttendanceCreate(Model):
     attempt_id: Identifier
     device_id: Device
@@ -86,6 +122,7 @@ class AttendanceCreate(Model):
     direction: Literal["left", "right"]
     checks: Checks
     metrics: Metrics
+    location: LocationSummary | None = None
 
 
 class View(Model):

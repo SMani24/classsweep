@@ -25,10 +25,28 @@ Shape example shows one point; real upload needs **8–2000 points per view**, 1
 
 ## Sessions / attempts / results
 
-- `POST /admin/sessions` (Basic + CSRF) `{title,ttl_seconds:300}` → 201 `{id,title,code_a,code_b,expires_at,classroom_reference_id}`. TTL 30–1800 seconds. Requires room calibration. Both fresh four-digit codes shown in dashboard `/admin`.
-- `GET /api/sessions` → active array `{id,title,expires_at,classroom_reference_id}` (no codes).
+- `POST /admin/sessions` (Basic + CSRF) `{title,ttl_seconds:300,gps:{enabled:false}}` → 201 `{id,title,code_a,code_b,expires_at,classroom_reference_id,gps}`. TTL 30–1800 seconds. Requires room calibration. Both fresh four-digit codes shown in dashboard `/admin`.
+- `GET /api/sessions` → active array `{id,title,expires_at,classroom_reference_id,gps}` (no codes). `GET /api/sessions/{id}` (student bearer) refreshes the same live policy/shape; unknown 404, expired 410.
+- `GET /admin/sessions` (Basic) lists sessions including codes and live `gps`. `POST /admin/sessions/{id}/gps/disable` (Basic + CSRF, empty body) → `{id,gps:{enabled:false}}`; idempotent for active sessions, unknown 404, expired 410. HTML form CSRF supported (303 to dashboard). Existing sessions can only disable GPS: no enabling, moving or changing radius. Disabling preserves the initial stored policy, classroom reference and camera attempts; every subsequent response hides the center. Attendance validation reads the live policy atomically at submission.
+
+### Optional GPS contract
+
+`gps` defaults to exactly `{"enabled":false}`; when disabled, no additional policy fields are allowed. Instructor phone may instead create a session with:
+
+```json
+{"title":"Lecture 1","ttl_seconds":300,"gps":{"enabled":true,"latitude":35.7,"longitude":51.4,"accuracy_m":20.0,"captured_at":1800000000.0,"radius_m":100.0}}
+```
+
+Coordinates must be finite, latitude -90..90, longitude -180..180. `radius_m` is finite numeric 25..1000, default 100. `accuracy_m` is finite 0..min(radius_m/2,100). Capture time is Unix seconds, at most 60 seconds old or 15 seconds ahead of the injectable server clock (inclusive boundaries). Invalid creation is 422. Enabled responses include this policy/center for **local haversine processing**; disabled responses contain only `{"enabled":false}`. Student should refresh before capture/submission, request no location permission while disabled, and prevalidate capture before sending camera results.
+
+When live GPS is enabled, attendance additionally requires top-level `location` containing exactly `{"distance_m":42.0,"accuracy_m":12.0,"captured_at":1800000000.0}`. Never send student latitude/longitude. Distance must be finite 0..radius_m; accuracy finite 0..min(radius_m/2,100); capture uses the same 60/15-second limits, evaluated at submission. Missing location, out-of-range distance, poor accuracy or stale/future capture fails 403 and consumes the owner's structurally valid attempt, like existing failed checks. Invalid shape/type/nonfinite numbers or raw-coordinate fields fail 422 without consuming the attempt. When GPS is disabled, location summaries are ignored/dropped (even stale/out-of-range summaries); raw coordinates and other unknown fields remain forbidden. Checks and metrics retain their existing strict schema.
+
+Successful attendance response adds `gps_status:"passed"|"disabled"`; only passed responses also include `location:{distance_m,accuracy_m}`. Saved attendance stores only this derived status and optional distance/accuracy, never student raw coordinates or capture timestamps. Own attendance history includes these same additive fields. CSV appends `gps_status,gps_distance_m,gps_accuracy_m` without changing existing columns/metrics. GPS claims, like vision claims, are client-attested.
+
+### Camera attendance protocol
+
 - `POST /api/attempts` student JSON `{session_id,code_a,code_b,device_id,reference_sha256}` → 201 `{attempt_id,session_id,direction:"left"|"right",instruction,expires_at,classroom_reference_id}`. Two valid OCR-collected codes required; A/B order may be reversed. Both must belong to selected session_id. Phone fetches pinned classroom reference if needed. Random turn **then return to center** instruction; TTL 90 seconds capped by session expiry. New attempt invalidates prior active attempt for this user/session.
-- `POST /api/attendance` exact JSON below → 201 `{id,session_id,recorded_at}`:
+- `POST /api/attendance` exact JSON below (plus optional/required `location` as above) → 201 `{id,session_id,recorded_at,gps_status,location?}`:
 
 ```json
 {
@@ -43,7 +61,7 @@ Shape example shows one point; real upload needs **8–2000 points per view**, 1
 ```
 
 All checks must be literal booleans and all true; unknown fields rejected. All metrics finite numbers: match_distance 0–10; max_yaw_degrees 0–180; return_yaw_degrees -180–180; duration_ms >0–90000; room_good_matches and room_recheck_good_matches integers 8–12000; room_inlier_ratio and room_recheck_inlier_ratio >0–1; motion_correlation -1–1. Rear scan before front challenge and rear recheck afterwards must both pass locally; motion correlation is a client measurement. Client implements and thresholds actual vision; server validates claims/bindings and does not independently verify biometric/liveness/room evidence. Direction, enrolled device, approved image hash, and session's classroom ID must match. Structurally valid owner submission consumes attempt even on failed checks/binding; invalid schema does not. Replay/duplicate 409; expired 410; failed bindings/checks 403; unknown/other user's attempt 404. Atomic unique attendance per user/session.
-- `GET /api/attendance` → own array `{id,session_id,title,recorded_at}`.
+- `GET /api/attendance` → own array `{id,session_id,title,recorded_at,gps_status,location?}`. `location` is present only for passed GPS and contains distance/accuracy only.
 
 ## Web admin
 

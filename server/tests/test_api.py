@@ -268,3 +268,58 @@ def test_admin_html_forms_and_enrollment_revocation(env):
     assert client.post('/api/attendance', headers=headers, json=result(challenge, sha)).status_code == 409
     assert client.get('/api/me', headers=headers).json()['enrollment_status'] == 'rejected'
     assert client.get('/api/enrollment/reference', headers=headers).status_code == 403
+
+
+def test_instructor_sign_in_never_grants_student_tokens_admin_access(env):
+    client, _, clock = env
+    response = client.post("/api/register", json={
+        "username": "admin", "display_name": "Student with this ID",
+        "device_id": DEVICE, "password": "eight123",
+    })
+    assert response.status_code == 201
+    student = {"Authorization": f'Bearer {response.json()["token"]}'}
+    assert client.post("/api/admin/classroom", headers=student, json=room_payload()).status_code == 403
+    login = {"username": "admin", "device_id": "instructor-phone", "password": "eight123"}
+    assert client.post("/api/instructor/login", json=login).status_code == 401
+    login["password"] = ADMIN_PASSWORD
+    first = client.post("/api/instructor/login", json=login).json()
+    instructor = {"Authorization": f'Bearer {first["token"]}'}
+    assert client.get("/api/me", headers=instructor).json()["role"] == "instructor"
+    assert client.post("/api/admin/classroom", headers=instructor, json=room_payload()).status_code == 201
+    assert client.post("/admin/sessions", headers=instructor, json={"title": "Class"}).status_code == 201
+    assert client.get("/api/attendance", headers=instructor).status_code == 401
+    assert client.post("/api/logout", headers=instructor).status_code == 204
+    assert client.get("/api/me", headers=instructor).status_code == 401
+    assert client.get("/admin/sessions", headers=instructor).status_code == 403
+    second = client.post("/api/instructor/login", json=login).json()
+    clock[0] = second["expires_at"]
+    assert client.get("/api/me", headers={"Authorization": f'Bearer {second["token"]}'}).status_code == 401
+
+
+def test_instructor_can_close_and_repeat_a_test_code_pair(env):
+    client, _, clock = env
+    _, student, sha = approved_account(client)
+    room(client)
+    admin_access = admin(client)
+    create = "/admin/sessions"
+    data = {"title": "Home test", "code_a": "0123", "code_b": "9876"}
+    assert client.post(create, json={**data, "code_b": "0123"}, **admin_access).status_code == 422
+    assert client.post(create, json={**data, "code_b": None}, **admin_access).status_code == 422
+    lecture = client.post(create, json=data, **admin_access).json()
+    assert (lecture["code_a"], lecture["code_b"]) == ("0123", "9876")
+    assert "code_a" not in client.get("/api/sessions", headers=student).json()[0]
+    assert attempt(client, student, sha, lecture, reverse=True).status_code == 201
+    assert client.post(create, json=data, **admin_access).status_code == 409
+    html_form = {**data, "ttl_seconds": "300", "csrf_token": admin_access["headers"]["X-CSRF-Token"]}
+    conflict = client.post("/admin/sessions/create", auth=admin_access["auth"], data=html_form)
+    assert conflict.status_code == 409 and 'role="alert"' in conflict.text
+    closed = client.post(f'/admin/sessions/{lecture["id"]}/close', **admin_access, follow_redirects=False)
+    assert closed.status_code == 303
+    clock[0] += 1
+    repeat = client.post("/admin/sessions/create", auth=admin_access["auth"], data=html_form,
+                         follow_redirects=False)
+    assert repeat.status_code == 303
+    new, old = client.get(create, auth=admin_access["auth"]).json()
+    assert new["id"] != old["id"] == lecture["id"]
+    assert attempt(client, student, sha, new).status_code == 201
+    assert attempt(client, student, sha, old).status_code == 410

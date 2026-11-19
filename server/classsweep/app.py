@@ -2,7 +2,6 @@
 import csv
 import hashlib
 import hmac
-import html
 import io
 import json
 import os
@@ -21,6 +20,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from .models import Register, Login, SessionCreate, AttemptCreate, AttendanceCreate, ClassroomCreate, TemplateReady
+from .dashboard import render_dashboard
 from .storage import Database, digest, password_hash, verify_password
 
 MAX_IMAGE = 5 * 1024 * 1024
@@ -74,7 +74,7 @@ def create_app():
     data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     db = Database(data_dir / "classsweep.sqlite3")
     os.chmod(db.path, 0o600)
-    app = FastAPI(title="ClassSweep", version="0.1.0")
+    app = FastAPI(title="ClassSweep", version="0.2.0")
     app.state.db = db
     app.state.now = time.time  # injectable clock for expiry tests
     dummy_hash = password_hash(secrets.token_urlsafe(32))
@@ -109,11 +109,20 @@ def create_app():
     def live_gps(session):
         return {"enabled": False} if session["gps_disabled_at"] is not None else json.loads(session["gps_json"])
 
-    def public_session(session, admin_view=False):
+    def session_codes(conn, session):
+        override = conn.execute(
+            "SELECT code_a,code_b FROM session_test_codes WHERE session_id=?", (session["id"],)
+        ).fetchone()
+        source = override if override is not None else session
+        return source["code_a"], source["code_b"]
+
+    def public_session(session, conn=None):
         fields = ("id", "title", "expires_at", "classroom_reference_id")
-        if admin_view:
-            fields += ("code_a", "code_b", "created_at")
-        return {**{key: session[key] for key in fields}, "gps": live_gps(session)}
+        result = {**{key: session[key] for key in fields}, "gps": live_gps(session)}
+        if conn is not None:
+            a, b = session_codes(conn, session)
+            result.update(code_a=a, code_b=b, created_at=session["created_at"])
+        return result
 
     def gps_result_fields(stored):
         gps = json.loads(stored)
@@ -122,13 +131,37 @@ def create_app():
             result["location"] = {"distance_m": gps["distance_m"], "accuracy_m": gps["accuracy_m"]}
         return result
 
-    def admin(credentials: HTTPBasicCredentials | None = Depends(basic)):
-        if (credentials is None or not hmac.compare_digest(credentials.username.encode(), b"admin")
-                or not hmac.compare_digest(digest(credentials.password), digest(admin_password))):
+    def instructor_token_hash(token):
+        return hmac.new(admin_password.encode(), token.encode(), hashlib.sha256).hexdigest()
+
+    def instructor_session(credentials):
+        if credentials is None or len(credentials.credentials) > 256:
+            return None
+        with db.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM instructor_tokens WHERE token_hash=? AND expires_at>?",
+                (instructor_token_hash(credentials.credentials), now()),
+            ).fetchone()
+
+    def valid_admin_password(value):
+        return hmac.compare_digest(digest(value), digest(admin_password))
+
+    def admin(credentials: HTTPBasicCredentials | None = Depends(basic),
+              token: HTTPAuthorizationCredentials | None = Depends(bearer)):
+        if token is not None:
+            if instructor_session(token) is not None:
+                return "bearer"
+            raise HTTPException(403, "Instructor sign-in required")
+        if (credentials is None or credentials.username != "admin"
+                or not valid_admin_password(credentials.password)):
             raise HTTPException(401, "Admin authentication required", headers={"WWW-Authenticate": 'Basic realm="ClassSweep admin"'})
-        return True
+        return "basic"
 
     async def admin_write(request: Request, authenticated=Depends(admin)):
+        # App authorization is explicitly set on each request. Browsers may
+        # attach cached Basic credentials automatically, so forms retain CSRF.
+        if authenticated == "bearer":
+            return
         token = request.headers.get("X-CSRF-Token")
         if not token and request.headers.get("content-type", "").startswith("application/x-www-form-urlencoded"):
             token = (await request.form()).get("csrf_token")
@@ -182,7 +215,7 @@ def create_app():
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "service": "classsweep", "version": "0.1.0"}
+        return {"status": "ok", "service": "classsweep", "version": "0.2.0"}
 
     @app.post("/api/register", status_code=201)
     def register(body: Register):
@@ -206,14 +239,38 @@ def create_app():
                 raise HTTPException(403, "Device does not match registered device")
             return issue_token(user, conn)
 
+    def instructor_profile(device_id):
+        return {"id": "instructor", "username": "admin", "display_name": "Instructor",
+                "device_id": device_id, "enrollment_status": "none", "role": "instructor"}
+
+    @app.post("/api/instructor/login")
+    def instructor_login(body: Login):
+        if body.username != "admin" or not valid_admin_password(body.password):
+            raise HTTPException(401, "Invalid instructor credentials")
+        token = secrets.token_urlsafe(32)
+        expires_at = now() + TOKEN_TTL
+        with db.connect(write=True) as conn:
+            conn.execute("DELETE FROM instructor_tokens WHERE expires_at<=?", (now(),))
+            conn.execute("INSERT INTO instructor_tokens VALUES (?,?,?)",
+                         (instructor_token_hash(token), body.device_id, expires_at))
+        return {"user": instructor_profile(body.device_id), "token": token, "expires_at": expires_at}
+
     @app.post("/api/logout", status_code=204)
-    def logout(user=Depends(current_user), credentials=Depends(bearer)):
+    def logout(credentials=Depends(bearer)):
+        if credentials is None or len(credentials.credentials) > 256:
+            raise HTTPException(401, "Bearer token required")
         with db.connect(write=True) as conn:
             conn.execute("DELETE FROM tokens WHERE token_hash=?", (digest(credentials.credentials),))
+            conn.execute("DELETE FROM instructor_tokens WHERE token_hash=?",
+                         (instructor_token_hash(credentials.credentials),))
         return Response(status_code=204)
 
     @app.get("/api/me")
-    def me(user=Depends(current_user)):
+    def me(credentials=Depends(bearer)):
+        instructor = instructor_session(credentials)
+        if instructor is not None:
+            return instructor_profile(instructor["device_id"])
+        user = current_user(credentials)
         with db.connect() as conn:
             return public_user(user, conn)
 
@@ -309,8 +366,8 @@ def create_app():
     def attempt(body: AttemptCreate, user=Depends(current_user)):
         with db.connect(write=True) as conn:
             approved(conn, user, body.device_id, body.reference_sha256)
-            session = conn.execute("SELECT * FROM sessions WHERE id=? AND ((code_a=? AND code_b=?) OR (code_a=? AND code_b=?))", (body.session_id, body.code_a, body.code_b, body.code_b, body.code_a)).fetchone()
-            if session is None:
+            session = conn.execute("SELECT * FROM sessions WHERE id=?", (body.session_id,)).fetchone()
+            if session is None or set(session_codes(conn, session)) != {body.code_a, body.code_b}:
                 raise HTTPException(404, "Unknown session codes")
             if session["expires_at"] <= now():
                 raise HTTPException(410, "Session expired")
@@ -392,18 +449,38 @@ def create_app():
             room = conn.execute("SELECT value FROM settings WHERE key='classroom'").fetchone()
             if room is None:
                 raise HTTPException(409, "Calibrate classroom from instructor phone first")
-            # All live codes distinct even across A/B positions, so board OCR cannot mix sessions.
-            used = {r[0] for r in conn.execute("SELECT code_a FROM sessions UNION SELECT code_b FROM sessions")}
-            available = [f"{n:04d}" for n in range(1000, 10000) if f"{n:04d}" not in used]
-            if len(available) < 2:
-                raise HTTPException(409, "Code space exhausted; archive old database before creating more sessions")
-            a = secrets.choice(available)
-            available.remove(a)
-            b = secrets.choice(available)
-            result = {"id": secrets.token_urlsafe(18), "title": body.title, "code_a": a, "code_b": b,
-                      "expires_at": now() + body.ttl_seconds, "classroom_reference_id": room["value"],
+            session_id = secrets.token_urlsafe(18)
+            timestamp = now()
+            live_sessions = conn.execute("SELECT * FROM sessions WHERE expires_at>?", (timestamp,))
+            live_codes = {code for session in live_sessions for code in session_codes(conn, session)}
+            if body.code_a is not None:
+                a, b = body.code_a, body.code_b
+                if {a, b} & live_codes:
+                    raise HTTPException(409, "A test code is already in an open session. Close that session first.")
+                # Legacy columns are unique across history. Reserve internal keys
+                # here and keep the user-selected, reusable codes separately.
+                stored_a, stored_b = f"test:{session_id}:a", f"test:{session_id}:b"
+            else:
+                historical = {row[0] for row in conn.execute(
+                    "SELECT code_a FROM sessions UNION SELECT code_b FROM sessions"
+                )}
+                available = [str(n) for n in range(1000, 10000)
+                             if str(n) not in historical and str(n) not in live_codes]
+                if len(available) < 2:
+                    raise HTTPException(409, "Code space exhausted; archive old database before creating more sessions")
+                a = stored_a = secrets.choice(available)
+                available.remove(a)
+                b = stored_b = secrets.choice(available)
+            result = {"id": session_id, "title": body.title, "code_a": a, "code_b": b,
+                      "expires_at": timestamp + body.ttl_seconds, "classroom_reference_id": room["value"],
                       "gps": body.gps.model_dump()}
-            conn.execute("INSERT INTO sessions (id,title,code_a,code_b,created_at,expires_at,classroom_reference_id,gps_json) VALUES (?,?,?,?,?,?,?,?)", (result["id"], body.title, a, b, now(), result["expires_at"], room["value"], body.gps.model_dump_json()))
+            conn.execute(
+                "INSERT INTO sessions (id,title,code_a,code_b,created_at,expires_at,classroom_reference_id,gps_json) VALUES (?,?,?,?,?,?,?,?)",
+                (session_id, body.title, stored_a, stored_b, timestamp, result["expires_at"],
+                 room["value"], body.gps.model_dump_json()),
+            )
+            if body.code_a is not None:
+                conn.execute("INSERT INTO session_test_codes VALUES (?,?,?)", (session_id, a, b))
         return result
 
     @app.post("/admin/sessions", status_code=201, dependencies=[Depends(admin_write)])
@@ -414,16 +491,31 @@ def create_app():
     async def session_create_html(request: Request):
         form = await request.form()
         try:
-            body = SessionCreate(title=form.get("title"), ttl_seconds=int(form.get("ttl_seconds", 300)))
+            body = SessionCreate(title=form.get("title"), ttl_seconds=int(form.get("ttl_seconds", 300)),
+                                 code_a=str(form.get("code_a", "")).strip() or None,
+                                 code_b=str(form.get("code_b", "")).strip() or None)
         except (ValidationError, ValueError, TypeError):
-            raise HTTPException(422, "Provide a title and TTL between 30 and 1800 seconds")
-        create_session(body)
-        return RedirectResponse("/admin", status_code=303)
+            return render_admin_form_error(
+                form, "Enter a title, a duration of 30–1800 seconds, and two distinct four-digit codes if overriding.", 422
+            )
+        try:
+            create_session(body)
+        except HTTPException as error:
+            return render_admin_form_error(form, error.detail, error.status_code)
+        return RedirectResponse("/admin#sessions", status_code=303)
 
     @app.get("/admin/sessions", dependencies=[Depends(admin)])
     def all_sessions():
         with db.connect() as conn:
-            return [public_session(row, admin_view=True) for row in conn.execute("SELECT * FROM sessions ORDER BY created_at DESC")]
+            return [public_session(row, conn) for row in conn.execute("SELECT * FROM sessions ORDER BY created_at DESC")]
+
+    @app.post("/admin/sessions/{session_id}/close", dependencies=[Depends(admin_write)])
+    def close_session(session_id: str):
+        with db.connect(write=True) as conn:
+            result = conn.execute("UPDATE sessions SET expires_at=MIN(expires_at,?) WHERE id=?", (now(), session_id))
+            if not result.rowcount:
+                raise HTTPException(404, "Session not found")
+        return RedirectResponse("/admin#sessions", status_code=303)
 
     @app.post("/admin/sessions/{session_id}/gps/disable", dependencies=[Depends(admin_write)])
     def disable_gps(session_id: str, request: Request):
@@ -494,41 +586,25 @@ def create_app():
     def home():
         return '<!doctype html><html lang="en"><title>ClassSweep</title><h1>ClassSweep</h1><p>Local attendance server. <a href="/admin">Instructor dashboard</a></p></html>'
 
-    @app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(admin)])
-    def dashboard():
-        e = html.escape
+    def render_admin_form_error(form, message, status):
+        fields = {key: str(form.get(key, ""))[:150] for key in ("title", "ttl_seconds", "code_a", "code_b")}
+        return HTMLResponse(dashboard_html(form=fields, form_error=message), status_code=status)
+
+    def dashboard_html(form=None, form_error=None):
         csrf = csrf_token()
         with db.connect() as conn:
-            enrollments = conn.execute("SELECT u.id,u.username,u.display_name,e.status,e.sha256,e.image IS NOT NULL AS available,e.provisioned_at FROM users u LEFT JOIN enrollments e ON e.user_id=u.id ORDER BY u.created_at DESC").fetchall()
-            sessions = conn.execute("SELECT s.*,(SELECT COUNT(*) FROM attendance a WHERE a.session_id=s.id) AS total FROM sessions s ORDER BY created_at DESC").fetchall()
+            enrollments = conn.execute("SELECT u.id,u.username,u.display_name,e.status,e.image IS NOT NULL AS available,e.provisioned_at FROM users u JOIN enrollments e ON u.id=e.user_id ORDER BY (e.status='pending') DESC,e.updated_at DESC").fetchall()
+            sessions = [dict(row, codes=session_codes(conn, row), gps=live_gps(row)) for row in conn.execute(
+                "SELECT s.*,(SELECT COUNT(*) FROM attendance a WHERE a.session_id=s.id) AS total FROM sessions s ORDER BY s.created_at DESC")]
             room = conn.execute("SELECT c.payload FROM classroom_refs c JOIN settings s ON c.id=s.value WHERE s.key='classroom'").fetchone()
-        rows = []
-        for row in enrollments:
-            uid = e(row["id"], quote=True)
-            actions = []
-            if row["status"] == "pending":
-                actions += [("approve", "Approve"), ("reject", "Reject")]
-            if row["status"] == "approved":
-                actions.append(("revoke", "Revoke enrollment"))
-            if row["available"] and (row["status"] != "approved" or row["provisioned_at"] is not None):
-                actions.append(("delete", "Purge image" if row["status"] == "approved" else "Delete image"))
-            forms = "".join(f'<form method="post" action="/admin/enrollments/{uid}/{action}"><input type="hidden" name="csrf_token" value="{csrf}"><button>{label}</button></form>' for action, label in actions)
-            image = f'<a href="/admin/enrollments/{uid}/image"><img alt="Enrollment reference" src="/admin/enrollments/{uid}/image" width="140"></a>' if row["available"] else "No retained image"
-            rows.append(f'<tr><td>{e(row["display_name"])}<br>{e(row["username"])}</td><td>{e(row["status"] or "none")}<br><small>{e(row["sha256"] or "")}</small></td><td>{image}</td><td>{forms}</td></tr>')
-        session_rows = []
-        for s in sessions:
-            gps = live_gps(s)
-            gps_label = f'GPS on · {gps["radius_m"]:g} m radius' if gps["enabled"] else "GPS off"
-            disable_form = ""
-            if gps["enabled"] and s["expires_at"] > now():
-                disable_form = f'<form method="post" action="/admin/sessions/{e(s["id"], quote=True)}/gps/disable"><input type="hidden" name="csrf_token" value="{csrf}"><button>Disable GPS</button></form>'
-            session_rows.append(f'<tr><td>{e(s["title"])}</td><td class="codes">{e(s["code_a"])} &nbsp; {e(s["code_b"])}</td><td>{"Open" if s["expires_at"] > now() else "Expired"}<br>{max(0,int(s["expires_at"]-now()))}s left</td><td>{gps_label}{disable_form}</td><td>{s["total"]} <a href="/admin/sessions/{e(s["id"])}/results.csv">CSV</a></td></tr>')
-        room_name = e(json.loads(room["payload"])["name"]) if room else "Not calibrated — use instructor phone to upload processed ORB descriptors."
-        return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ClassSweep instructor</title>
-<style>body{{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem;background:#f5f7fa;color:#172436}}table{{border-collapse:collapse;width:100%;background:white}}td,th{{padding:12px;text-align:left;border-bottom:1px solid #ddd}}small{{overflow-wrap:anywhere}}button,input{{padding:9px;margin:4px}}form{{display:inline-block}}.codes{{font-size:2rem;font-weight:bold;white-space:nowrap}}img{{max-height:160px;object-fit:contain}}</style>
-<h1>ClassSweep instructor</h1><p>Room: {room_name}</p><p><a href="/admin">Refresh dashboard</a>. Approval binds the exact image to the registered device. Purge images only after phone template provisioning; revoke separately to remove enrollment.</p>
-<h2>Create session</h2><form method="post" action="/admin/sessions/create"><input type="hidden" name="csrf_token" value="{csrf}"><input name="title" required maxlength="150" placeholder="Lecture title"><label>TTL seconds <input name="ttl_seconds" type="number" min="30" max="1800" value="300" required></label><button>Create fresh codes</button></form>
-<h2>Sessions</h2><table><tr><th>Title</th><th>Board codes A / B</th><th>Status</th><th>GPS</th><th>Results</th></tr>{''.join(session_rows)}</table>
-<h2>Enrollment review</h2><table><tr><th>Account</th><th>Status / exact SHA-256</th><th>Reference image</th><th>Actions</th></tr>{''.join(rows)}</table><p>Routine attendance contains local checks and metrics only. These client claims are not independent proof of presence. HTTP Basic credentials remain cached by the browser; close the private browser session when finished.</p></html>'''
+        return render_dashboard(
+            room=json.loads(room["payload"])["name"] if room else None,
+            enrollments=enrollments, sessions=sessions, csrf=csrf, timestamp=now(),
+            form=form, form_error=form_error,
+        )
+
+    @app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(admin)])
+    def dashboard():
+        return dashboard_html()
 
     return app

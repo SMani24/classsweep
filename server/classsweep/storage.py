@@ -13,6 +13,13 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS tokens (
  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS instructor_tokens (
+ token_hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, expires_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_test_codes (
+ session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+ code_a TEXT NOT NULL, code_b TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS enrollments (
  user_id TEXT PRIMARY KEY REFERENCES users(id), status TEXT NOT NULL,
  image BLOB, mime TEXT, sha256 TEXT, device_id TEXT NOT NULL, updated_at REAL NOT NULL,

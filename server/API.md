@@ -1,11 +1,12 @@
 # ClassSweep API v1 (mobile contract)
 
-Base `http://HOST:8000`. JSON; times Unix seconds UTC; string IDs. Errors `{ "detail": "..." }`; schema errors 422. Student endpoints require `Authorization: Bearer TOKEN`. Admin uses HTTP Basic `admin:CLASSSWEEP_ADMIN_PASSWORD`. Admin writes additionally require `X-CSRF-Token` from authenticated `GET /admin/csrf` → `{ "csrf_token":"..." }`. No cookies. Use HTTPS outside trusted local development.
+Base `http://HOST:8000`. JSON; times Unix seconds UTC; string IDs. Errors `{ "detail": "..." }`; schema errors 422. Student endpoints require `Authorization: Bearer TOKEN`. Admin routes accept an instructor bearer token or HTTP Basic `admin:CLASSSWEEP_ADMIN_PASSWORD`. Basic-authenticated writes require `X-CSRF-Token` from authenticated `GET /admin/csrf` → `{ "csrf_token":"..." }`; browser forms can send the token as a form field. Student tokens carry no instructor access. No cookies. Use HTTPS outside trusted local development.
 
 ## Account / one-time enrollment
 
-- `POST /api/register` `{username,password,display_name,device_id}` → 201 `{user,token,expires_at}`. Username 3–64 ASCII letters/digits/`_.-`; password 10–256 chars; display_name 1–100; device_id 8–128. Token TTL 7 days.
+- `POST /api/register` `{username,password,display_name,device_id}` → 201 `{user,token,expires_at}`. Username 3–64 ASCII letters/digits/`_.-`; password 8–256 chars; display_name 1–100; device_id 8–128. Token TTL 7 days.
 - `POST /api/login` `{username,password,device_id}` → same shape; device_id must match registration (403 otherwise). Device identity is client-asserted, not hardware attestation. `POST /api/logout` → 204.
+- `POST /api/instructor/login` accepts the same login fields, with username `admin` and the configured instructor password. Returns a separate 7-day token with `user.role:"instructor"`. The instructor profile is available from `GET /api/me`; `POST /api/logout` revokes the token.
 - `GET /api/me` → `{id,username,display_name,device_id,enrollment_status,reference_sha256}`. Status `none|pending|approved|rejected`; hash null unless approved. Also `template_ready` and `image_available` booleans. `delete` means purge for approved enrollment; pending/rejected deletion resets enrollment. Revocation requires re-enrollment.
 - `POST /api/enrollment` multipart `device_id` + `image` JPEG/PNG, ≤5 MiB, ≤16 million pixels, actual image decode required → 201 `{status:"pending",reference_sha256}`. Cannot replace pending/approved upload; rejection/revocation permits retry.
 - `GET /api/enrollment/reference` → approved **original bytes**, headers `X-Reference-SHA256`, `X-Device-ID`, `Cache-Control: no-store`. 403 unless approved. Phone creates its local face template from these bytes; 410 if approved source bytes were subsequently purged. Hash is SHA-256 of exact uploaded/approved bytes. No routine attendance images, videos or face templates are accepted.
@@ -14,7 +15,7 @@ Base `http://HOST:8000`. JSON; times Unix seconds UTC; string IDs. Errors `{ "de
 
 ## Instructor room calibration (processed descriptors only)
 
-- `POST /api/admin/classroom` (Basic + CSRF) replaces current room reference, JSON:
+- `POST /api/admin/classroom` (instructor bearer or Basic + CSRF) replaces current room reference, JSON:
 
 ```json
 {"name":"Room 101","views":[{"id":"front","width":1280,"height":720,"keypoints":[[120.5,230.0]],"descriptors":[[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]]}]}
@@ -25,9 +26,9 @@ Shape example shows one point; real upload needs **8–2000 points per view**, 1
 
 ## Sessions / attempts / results
 
-- `POST /admin/sessions` (Basic + CSRF) `{title,ttl_seconds:300,gps:{enabled:false}}` → 201 `{id,title,code_a,code_b,expires_at,classroom_reference_id,gps}`. TTL 30–1800 seconds. Requires room calibration. Both fresh four-digit codes shown in dashboard `/admin`.
+- `POST /admin/sessions` (instructor bearer or Basic + CSRF) `{title,ttl_seconds:300,gps:{enabled:false}}` → 201 `{id,title,code_a,code_b,expires_at,classroom_reference_id,gps}`. TTL 30–1800 seconds. Requires room calibration. Random four-digit codes are the default. Optional `code_a` and `code_b` override them for testing. Supply two distinct four-digit strings, including leading zeroes. Overrides cannot overlap an open session. `POST /admin/sessions/{id}/close` closes the session while keeping its results.
 - `GET /api/sessions` → active array `{id,title,expires_at,classroom_reference_id,gps}` (no codes). `GET /api/sessions/{id}` (student bearer) refreshes the same live policy/shape; unknown 404, expired 410.
-- `GET /admin/sessions` (Basic) lists sessions including codes and live `gps`. `POST /admin/sessions/{id}/gps/disable` (Basic + CSRF, empty body) → `{id,gps:{enabled:false}}`; idempotent for active sessions, unknown 404, expired 410. HTML form CSRF supported (303 to dashboard). Existing sessions can only disable GPS: no enabling, moving or changing radius. Disabling preserves the initial stored policy, classroom reference and camera attempts; every subsequent response hides the center. Attendance validation reads the live policy atomically at submission.
+- `GET /admin/sessions` (instructor bearer or Basic) lists sessions including codes and live `gps`. `POST /admin/sessions/{id}/gps/disable` (instructor bearer or Basic + CSRF, empty body) → `{id,gps:{enabled:false}}`; idempotent for active sessions, unknown 404, expired 410. HTML form CSRF supported (303 to dashboard). Existing sessions can only disable GPS: no enabling, moving or changing radius. Disabling preserves the initial stored policy, classroom reference and camera attempts; every subsequent response hides the center. Attendance validation reads the live policy atomically at submission.
 
 ### Optional GPS contract
 

@@ -185,7 +185,7 @@ def test_disable_is_immediate_hides_center_and_preserves_pins_and_attempt(env):
         initial = dict(conn.execute('SELECT * FROM sessions WHERE id=?', (lecture['id'],)).fetchone())
         initial_attempt = dict(conn.execute('SELECT * FROM attempts WHERE id=?', (challenge['attempt_id'],)).fetchone())
     dashboard = client.get('/admin', auth=('admin', ADMIN_PASSWORD)).text
-    assert 'GPS on · 100 m radius' in dashboard and endpoint in dashboard
+    assert 'GPS · 100 m' in dashboard and endpoint in dashboard
     assert 'name="csrf_token"' in dashboard
     assert str(lecture['gps']['latitude']) not in dashboard
     assert client.post(endpoint).status_code == 401

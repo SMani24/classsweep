@@ -15,7 +15,7 @@ Identifier = Annotated[str, Field(min_length=1, max_length=128)]
 
 class Register(Model):
     username: Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{3,64}$")]
-    password: Annotated[str, Field(min_length=10, max_length=256)]
+    password: Annotated[str, Field(min_length=8, max_length=256)]
     display_name: Annotated[str, Field(min_length=1, max_length=100)]
     device_id: Device
 
@@ -61,10 +61,24 @@ class GPSEnabled(GPSPolicy):
         return self
 
 
+BoardCode = Annotated[str, Field(pattern=r"^[0-9]{4}$")]
+
+
 class SessionCreate(Model):
     title: Annotated[str, Field(min_length=1, max_length=150)]
     ttl_seconds: Annotated[StrictInt, Field(ge=30, le=1800)] = 300
     gps: Annotated[GPSDisabled | GPSEnabled, Field(discriminator="enabled")] = Field(default_factory=GPSDisabled)
+
+    code_a: BoardCode | None = None
+    code_b: BoardCode | None = None
+
+    @model_validator(mode="after")
+    def require_distinct_pair(self):
+        if (self.code_a is None) != (self.code_b is None) or (
+            self.code_a is not None and self.code_a == self.code_b
+        ):
+            raise ValueError("Enter two different four-digit test codes")
+        return self
 
     @field_validator("title")
     @classmethod

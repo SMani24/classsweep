@@ -58,3 +58,7 @@ Use an empty classroom or your own room initially. The classroom reference needs
 - Approximate completion time and any freezing, heat, or unexpected battery drain.
 
 Do not send classmates' images or raw face templates when reporting problems. A build and synthetic tests do not substitute for physical-device validation of camera orientation, lighting, sensor timing, handwriting, and face-verification thresholds.
+
+## Optional GPS trial
+
+Finish one camera-only check-in first. Then use the phone’s instructor attendance settings to create a GPS-required session, initially with the default 100m radius near a window or outdoors. Test permission denial, poor accuracy and the instructor’s live Disable GPS action. See [GPS.md](GPS.md) for acceptance rules and privacy.

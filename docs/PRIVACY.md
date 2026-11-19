@@ -21,3 +21,7 @@ Wi-Fi is the default: the launcher binds to the selected local Wi-Fi/Ethernet ad
 This is an educational attendance aid. The server trusts derived results from the app. A modified client, sophisticated relay, or some screen replay attacks can bypass checks. Scores and thresholds are experimental and must be evaluated for false rejection and false acceptance. A missing sensor, unreadable board, accessibility need, or camera failure requires a manual attendance alternative.
 
 No real enrollment images, biometric templates, credentials, or attendance records belong in the public GitHub repository or test fixtures.
+
+## Optional location
+
+GPS is disabled by default. When enabled for a session, the instructor explicitly captures their location as the classroom center; that center, accuracy, time and radius are stored on the laptop and shared with authenticated student phones for local distance calculation. Student raw coordinates stay on their phone. Only derived distance, accuracy and capture time are submitted; retained attendance data includes GPS status and optionally distance/accuracy, not student coordinates or capture timestamps. GPS-off sessions request no location permission or position. Location is sampled only in the foreground for a specific check, not tracked continuously. Disabling an open session stops further GPS requirements and drops subsequently supplied location summaries; it does not erase earlier records or the original instructor policy.

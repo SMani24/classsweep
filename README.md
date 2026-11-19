@@ -9,6 +9,7 @@ Students scan fresh handwritten codes on opposite sides of the board, follow a s
 - Flutter Android app with registration, enrollment, instructor room calibration, and guided attendance.
 - Local YuNet/SFace face verification, ML Kit OCR and head-pose checks, OpenCV natural-feature matching and optical flow, and gyroscope consistency.
 - FastAPI/SQLite server with an instructor dashboard, image review, expiring attendance sessions, duplicate/replay checks, and CSV export.
+- Optional GPS radius check configured from the instructor phone, with an off switch for poor reception. Student coordinates stay on the phone.
 - Reproducible model downloads with pinned upstream commit and SHA-256 verification.
 - Automated API, challenge-logic, and native-model smoke tests.
 
@@ -43,7 +44,7 @@ Each successful build updates `~/apks/ClassSweep-debug.apk`, alongside your othe
 1. Calibrate a distinctive, mostly flat board region from the app's instructor screen.
 2. Register a student account and submit an enrollment photo.
 3. Approve the exact photo in the laptop dashboard and install its local template on the phone.
-4. Create a session in the dashboard and write its two codes on opposite sides of the board.
+4. Create a session from the phone’s instructor settings or laptop dashboard, and write its two codes on opposite sides of the board. The phone can optionally require GPS within a configurable radius.
 5. Follow the app's camera instructions, then check the attendance record and CSV on the laptop.
 
 The initial calibration UI uploads one reference view. Its reliability across different seats must be evaluated. Use textured surroundings, avoid people, and start with nearby seating.
@@ -56,7 +57,7 @@ Wi-Fi is the default. The launcher binds to the selected Wi-Fi/Ethernet IP and a
 
 This is an educational attendance aid. Checks deter casual sharing and replay; they do not establish tamper-proof physical presence. The server trusts the app's reported checks. Device-specific camera orientation, handwriting readability, sensor timing, and verification thresholds require physical-phone testing. Always provide a manual attendance alternative.
 
-See [Wi-Fi setup and troubleshooting](docs/WIFI.md). Optional USB forwarding remains available with `--local-only`.
+See [optional GPS setup and tests](docs/GPS.md), and [Wi-Fi setup and troubleshooting](docs/WIFI.md). Optional USB forwarding remains available with `--local-only`.
 
 Read [data handling](docs/PRIVACY.md), [the API contract](server/API.md), and [server setup](server/README.md).
 

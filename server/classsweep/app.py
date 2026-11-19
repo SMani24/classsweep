@@ -158,7 +158,7 @@ def create_app():
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        return {"status": "ok", "service": "classsweep", "version": "0.1.0"}
 
     @app.post("/api/register", status_code=201)
     def register(body: Register):

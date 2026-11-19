@@ -11,7 +11,7 @@ class LocalStore {
   LocalStore({FlutterSecureStorage? storage})
     : _storage = storage ?? const FlutterSecureStorage();
   final FlutterSecureStorage _storage;
-  static const defaultServer = 'http://127.0.0.1:8000';
+  static const defaultServer = 'http://laptop.local:8000';
   Future<String> deviceId() async {
     final old = await _storage.read(key: 'device_id');
     if (old != null && old.isNotEmpty) return old;

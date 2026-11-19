@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../network/api_client.dart';
 import 'app_model.dart';
 import 'classsweep_app.dart';
 import 'photo_page.dart';
@@ -225,6 +226,8 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final _url = TextEditingController(text: widget.model.serverUrl);
   bool _busy = false;
+  bool _testing = false;
+  String? _connectionResult;
   String? _error;
   @override
   void dispose() {
@@ -247,6 +250,30 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Future<void> _testConnection() async {
+    setState(() {
+      _testing = true;
+      _error = null;
+      _connectionResult = null;
+    });
+    ClassSweepApi? probe;
+    try {
+      probe = ClassSweepApi(_url.text);
+      await probe.testConnection();
+      if (mounted) {
+        setState(
+          () => _connectionResult =
+              'Connected to ClassSweep. You can save this address.',
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = friendlyError(error));
+    } finally {
+      probe?.close();
+      if (mounted) setState(() => _testing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Connection & privacy')),
@@ -258,31 +285,48 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         TextField(
           controller: _url,
-          enabled: !_busy,
+          enabled: !_busy && !_testing,
           keyboardType: TextInputType.url,
           autocorrect: false,
+          onChanged: (_) => setState(() {
+            _connectionResult = null;
+            _error = null;
+          }),
           decoration: const InputDecoration(
             labelText: 'Server URL',
-            hintText: 'http://192.168.1.20:8000',
+            hintText: 'http://laptop.local:8000',
           ),
         ),
         const InfoCard(
           icon: Icons.wifi_rounded,
-          title: 'On the same Wi-Fi',
-          body: 'Enter the computer’s local IP address, for example http://192.168.1.20:8000. The computer must allow connections to port 8000.',
+          title: 'Connect over Wi-Fi',
+          body: 'Keep the phone and laptop on the same Wi-Fi. Start ClassSweep on the laptop, then use http://laptop.local:8000. No USB cable is needed.',
         ),
         const InfoCard(
-          icon: Icons.usb_rounded,
-          title: 'Connected by USB',
-          body: 'After running adb reverse tcp:8000 tcp:8000 on your computer, use http://127.0.0.1:8000. On a phone, 127.0.0.1 refers to the phone unless forwarding is enabled.',
+          icon: Icons.router_outlined,
+          title: 'If the local name does not work',
+          body: 'Use the IP fallback printed by the laptop, such as http://192.168.1.20:8000. Guest Wi-Fi may block communication between devices. VPNs can also affect local access.',
         ),
         const Text(
           'Changing servers signs you out. Local HTTP is intended for a trusted classroom network; use HTTPS for remote access.',
           style: TextStyle(height: 1.5),
         ),
         if (_error != null) ErrorNotice(_error!),
+        if (_connectionResult != null)
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              _connectionResult!,
+              style: const TextStyle(color: teal),
+            ),
+          ),
+        OutlinedButton.icon(
+          onPressed: _busy || _testing ? null : _testConnection,
+          icon: const Icon(Icons.wifi_find_rounded),
+          label: Text(_testing ? 'Testing connection…' : 'Test connection'),
+        ),
         FilledButton(
-          onPressed: _busy ? null : _save,
+          onPressed: _busy || _testing ? null : _save,
           child: Text(_busy ? 'Saving…' : 'Save server'),
         ),
         const InfoCard(

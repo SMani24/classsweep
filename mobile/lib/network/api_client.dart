@@ -68,12 +68,15 @@ class ClassSweepApi {
     if (token != null) 'Authorization': 'Bearer $token',
   };
 
-  Future<http.Response> _send(http.BaseRequest request) async {
+  Future<http.Response> _send(
+    http.BaseRequest request, {
+    Duration requestTimeout = timeout,
+  }) async {
     try {
       final response = await _client
           .send(request)
           .then(http.Response.fromStream)
-          .timeout(timeout);
+          .timeout(requestTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         var message = 'Server request failed (${response.statusCode}).';
         try {
@@ -96,13 +99,36 @@ class ClassSweepApi {
       );
     } on SocketException {
       throw const ApiFailure(
-        'Cannot reach the server. Use the same Wi-Fi network or enable adb reverse.',
+        'Cannot reach the laptop. Check that both devices use the same Wi-Fi and the server is running. If .local does not work, use the IP address printed by the server.',
       );
     } on http.ClientException {
       throw const ApiFailure(
         'Connection failed. Check Wi-Fi, the server address, and whether the server is running.',
       );
     }
+  }
+
+  /// Tests the selected address without sending account credentials or saving it.
+  Future<void> testConnection() async {
+    final request = http.Request('GET', _uri('/health'));
+    request.headers['Accept'] = 'application/json';
+    final response = await _send(
+      request,
+      requestTimeout: const Duration(seconds: 6),
+    );
+    try {
+      final data = jsonDecode(response.body);
+      if (data is Map &&
+          data['status'] == 'ok' &&
+          data['service'] == 'classsweep') {
+        return;
+      }
+    } catch (_) {
+      /* A reachable web page is not necessarily ClassSweep. */
+    }
+    throw const ApiFailure(
+      'This address responded, but it is not a compatible ClassSweep server.',
+    );
   }
 
   Future<dynamic> _json(

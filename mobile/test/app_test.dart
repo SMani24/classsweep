@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:classsweep/app/app_model.dart';
+import 'package:classsweep/app/account_pages.dart';
 import 'package:classsweep/app/classsweep_app.dart';
 import 'package:classsweep/app/local_store.dart';
 import 'package:classsweep/network/api_client.dart';
@@ -23,6 +24,75 @@ class MemoryStore extends LocalStore {
 }
 
 void main() {
+  test('Wi-Fi is the fresh-install default and local hostnames are valid', () {
+    expect(LocalStore.defaultServer, 'http://laptop.local:8000');
+    expect(
+      normalizeServerUrl(' http://laptop.local:8000/ '),
+      LocalStore.defaultServer,
+    );
+  });
+
+  test(
+    'connection probe sends no credentials and checks server identity',
+    () async {
+      for (final body in [
+        '{"status":"ok","service":"classsweep"}',
+        '{"status":"ok"}',
+        '<html>Another service</html>',
+      ]) {
+        final api = ClassSweepApi(
+          'http://laptop.local:8000',
+          token: 'must-not-be-sent',
+          client: MockClient((request) async {
+            expect(request.url.toString(), 'http://laptop.local:8000/health');
+            expect(request.headers.containsKey('Authorization'), isFalse);
+            return http.Response(body, 200);
+          }),
+        );
+        if (body.contains('classsweep')) {
+          await api.testConnection();
+        } else {
+          await expectLater(api.testConnection(), throwsA(isA<ApiFailure>()));
+        }
+        api.close();
+      }
+    },
+  );
+
+  testWidgets(
+    'Wi-Fi settings explain hostname fallback and expose connection test',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final model = AppModel(store: MemoryStore());
+      await model.initialize();
+      await tester.pumpWidget(MaterialApp(home: SettingsPage(model: model)));
+      await tester.pumpAndSettle();
+      expect(find.text('Connect over Wi-Fi'), findsOneWidget);
+      expect(find.text('If the local name does not work'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'not a server address');
+      final testButton = find.text('Test connection');
+      await tester.scrollUntilVisible(
+        testButton,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(testButton, findsOneWidget);
+      await tester.ensureVisible(testButton);
+      await tester.tap(testButton);
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Use a server address such as'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      model.dispose();
+    },
+  );
+
   test(
     'server URL normalizes root and rejects embedded credentials or paths',
     () {

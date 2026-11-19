@@ -241,6 +241,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _testConnection() async {
+    FocusScope.of(context).unfocus();
     setState(() {
       _testing = true;
       _error = null;
@@ -269,10 +270,7 @@ class _SettingsPageState extends State<SettingsPage> {
     appBar: AppBar(title: const Text('Connection & privacy')),
     body: PageBody(
       children: [
-        const SectionTitle(
-          'Your classroom server',
-          'Connect to the instructor’s running ClassSweep server.',
-        ),
+        const SectionTitle('Your classroom server', ''),
         TextField(
           controller: _url,
           enabled: !_busy && !_testing,
@@ -286,20 +284,6 @@ class _SettingsPageState extends State<SettingsPage> {
             labelText: 'Server URL',
             hintText: 'http://laptop.local:8000',
           ),
-        ),
-        const InfoCard(
-          icon: Icons.wifi_rounded,
-          title: 'Connect over Wi-Fi',
-          body: 'Keep the phone and laptop on the same Wi-Fi. Start ClassSweep on the laptop, then use http://laptop.local:8000. No USB cable is needed.',
-        ),
-        const InfoCard(
-          icon: Icons.router_outlined,
-          title: 'If the local name does not work',
-          body: 'Use the IP fallback printed by the laptop, such as http://192.168.1.20:8000. Guest Wi-Fi may block communication between devices. VPNs can also affect local access.',
-        ),
-        const Text(
-          'Changing servers signs you out. Local HTTP is intended for a trusted classroom network; use HTTPS for remote access.',
-          style: TextStyle(height: 1.5),
         ),
         if (_error != null) ErrorNotice(_error!),
         if (_connectionResult != null)
@@ -320,9 +304,23 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Text(_busy ? 'Saving…' : 'Save server'),
         ),
         const InfoCard(
+          icon: Icons.wifi_rounded,
+          title: 'Connect over Wi-Fi',
+          body: 'Put both devices on the same Wi-Fi.',
+        ),
+        const InfoCard(
+          icon: Icons.router_outlined,
+          title: 'If the local name does not work',
+          body: 'Use the IP address printed by the laptop server.',
+        ),
+        const Text(
+          'Changing servers signs you out.',
+          style: TextStyle(height: 1.5),
+        ),
+        const InfoCard(
           icon: Icons.shield_outlined,
           title: 'Images stay local during attendance',
-          body: 'Only your one-time enrollment photo is uploaded for instructor review. Attendance sends measured results, never camera frames. The approved face template is stored in encrypted device storage, scoped to your account and server.',
+          body: 'Your instructor reviews the front enrollment photo. Check-ins send results only.',
         ),
         Text(
           'Device binding · ${widget.model.deviceId.isEmpty ? 'Unavailable' : widget.model.deviceId.substring(0, 12)}…',

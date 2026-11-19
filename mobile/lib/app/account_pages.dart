@@ -4,6 +4,7 @@ import '../network/api_client.dart';
 import 'app_model.dart';
 import 'classsweep_app.dart';
 import 'photo_page.dart';
+import 'instructor_page.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key, required this.model});
@@ -202,6 +203,18 @@ class _AuthPageState extends State<AuthPage> {
                   : () => Navigator.push(
                       context,
                       MaterialPageRoute<void>(
+                        builder: (_) => InstructorPage(model: widget.model),
+                      ),
+                    ),
+              icon: const Icon(Icons.event_note_outlined),
+              label: const Text('Instructor · Attendance settings'),
+            ),
+            TextButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
                         builder: (_) =>
                             PhotoPage(model: widget.model, calibration: true),
                       ),
@@ -350,6 +363,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
           icon: const Icon(Icons.meeting_room_outlined),
           label: const Text('Instructor calibration'),
+        ),
+        OutlinedButton.icon(
+          onPressed: _busy || _testing
+              ? null
+              : () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => InstructorPage(model: widget.model),
+                  ),
+                ),
+          icon: const Icon(Icons.event_note_outlined),
+          label: const Text('Instructor attendance & GPS'),
         ),
       ],
     ),

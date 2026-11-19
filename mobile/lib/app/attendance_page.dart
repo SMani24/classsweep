@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../vision/vision.dart';
+import '../location/location.dart';
+import '../network/attendance_location.dart';
 import 'app_model.dart';
 import 'camera_pane.dart';
 import 'classsweep_app.dart';
@@ -39,6 +41,10 @@ class _AttendancePageState extends State<AttendancePage> {
   String? _error;
   Map<String, dynamic>? _attempt;
   final Map<String, DateTime> _codes = {};
+  final LocationVerifier _locationVerifier = LocationVerifier();
+  GpsPolicy? _gpsPolicy;
+  String? _gpsResult;
+  bool _checkingLocation = false;
   RearFrameResult? _rear;
   SelfieFrameResult? _selfie;
   SceneMatch? _scanRoom, _recheckRoom;
@@ -118,6 +124,10 @@ class _AttendancePageState extends State<AttendancePage> {
         user.referenceHash!,
       );
       if (widget.session != null) {
+        final currentSession = await widget.model.api.session(
+          widget.session!['id'] as String,
+        );
+        _gpsPolicy = GpsPolicy.fromJson(currentSession['gps']);
         final room = await widget.model.api.classroom(
           widget.session!['classroom_reference_id'] as String,
         );
@@ -310,16 +320,34 @@ class _AttendancePageState extends State<AttendancePage> {
       return;
     }
     final generation = ++_generation;
-    setState(() => _stage = CaptureStage.submitting);
+    setState(() {
+      _stage = CaptureStage.submitting;
+      _error = null;
+      _checkingLocation = true;
+    });
     try {
       await _frameTask;
+      if (!mounted || generation != _generation) return;
+      // Always refresh: the instructor may have disabled GPS during this attempt.
+      final prepared = await prepareAttendanceLocation(
+        refreshSession: () =>
+            widget.model.api.session(widget.session!['id'] as String),
+        sessionId: widget.session!['id'] as String,
+        classroomReferenceId: _attempt!['classroom_reference_id'] as String,
+        verifier: _locationVerifier,
+      );
+      _gpsPolicy = prepared.policy;
+      final location = prepared.report;
+      if (!mounted || generation != _generation) return;
+      setState(() => _checkingLocation = false);
       final face = _completedFace!;
-      await widget.model.api.submit({
+      final result = await widget.model.api.submit({
         'attempt_id': _attempt!['attempt_id'],
         'device_id': widget.model.deviceId,
         'reference_sha256': widget.model.user!.referenceHash,
         'classroom_reference_id': _attempt!['classroom_reference_id'],
         'direction': _attempt!['direction'],
+        if (location != null) 'location': location.toJson(),
         'checks': {
           'face_match': face.identityMatches,
           'single_face': face.faceCount == 1,
@@ -348,7 +376,22 @@ class _AttendancePageState extends State<AttendancePage> {
         },
       });
       if (mounted && generation == _generation) {
-        setState(() => _stage = CaptureStage.done);
+        setState(() {
+          _stage = CaptureStage.done;
+          _gpsResult = result['gps_status'] == 'passed'
+              ? 'GPS passed · ${(result['location']['distance_m'] as num).toStringAsFixed(0)} m from the session center'
+              : 'GPS was not required for this attendance.';
+        });
+      }
+    } on GpsFailure catch (error) {
+      if (mounted && generation == _generation) {
+        // Local GPS failures have not consumed the server attempt. Retry only
+        // the location step while the existing camera challenge remains valid.
+        setState(() {
+          _stage = CaptureStage.review;
+          _checkingLocation = false;
+          _error = friendlyError(error);
+        });
       }
     } catch (error) {
       if (mounted && generation == _generation) {
@@ -410,6 +453,8 @@ class _AttendancePageState extends State<AttendancePage> {
                   ? 'Preparing local checks'
                   : stage == CaptureStage.connecting
                   ? 'Requesting a fresh challenge'
+                  : _checkingLocation
+                  ? 'Checking the session’s location requirement'
                   : 'Recording attendance',
               'Keep the app open. Camera frames stay on this phone.',
             ),
@@ -421,6 +466,15 @@ class _AttendancePageState extends State<AttendancePage> {
               'The approved enrollment image has been converted into a privately stored local template.',
             ),
             if (widget.session != null) ...[
+              InfoCard(
+                icon: Icons.location_on_outlined,
+                title: _gpsPolicy?.enabled == true
+                    ? 'GPS is required for this session'
+                    : 'GPS is off for this session',
+                body: _gpsPolicy?.enabled == true
+                    ? 'At submission, turn on Location and allow a precise reading. Your phone checks the accepted radius; your coordinates stay on the phone.'
+                    : 'No location reading or permission is requested. The instructor can choose GPS separately for each attendance session.',
+              ),
               const InfoCard(
                 icon: Icons.swipe_outlined,
                 title: 'Scan, pause, and return',
@@ -509,7 +563,7 @@ class _AttendancePageState extends State<AttendancePage> {
             const Icon(Icons.fact_check_outlined, size: 64, color: teal),
             const SectionTitle(
               'All camera checks completed',
-              'Your phone has matched the board, movement and enrolled face. Submit the processed results to record attendance.',
+              'Your phone has matched the board, movement and enrolled face. Submit to check any GPS requirement and record attendance.',
             ),
             FilledButton(
               onPressed: _submit,
@@ -522,6 +576,7 @@ class _AttendancePageState extends State<AttendancePage> {
               'Attendance recorded',
               'The server accepted your completed check-in.',
             ),
+            if (_gpsResult != null) Text(_gpsResult!),
             FilledButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Done'),

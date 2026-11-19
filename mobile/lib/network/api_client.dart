@@ -234,6 +234,48 @@ class ClassSweepApi {
       _list(await _json('GET', '/api/sessions'));
   Future<List<Map<String, dynamic>>> attendance() async =>
       _list(await _json('GET', '/api/attendance'));
+  Future<Map<String, dynamic>> session(String id) async =>
+      Map<String, dynamic>.from(
+        await _json('GET', '/api/sessions/${Uri.encodeComponent(id)}') as Map,
+      );
+
+  Map<String, String> _adminHeaders(String password) => {
+    'Authorization': 'Basic ${base64Encode(utf8.encode('admin:$password'))}',
+  };
+
+  Future<Map<String, dynamic>> _adminWrite(
+    String path,
+    String password,
+    Map<String, dynamic> body,
+  ) async {
+    final headers = _adminHeaders(password);
+    final csrf = await _json('GET', '/admin/csrf', null, headers) as Map;
+    return Map<String, dynamic>.from(
+      await _json('POST', path, body, {
+        ...headers,
+        'X-CSRF-Token': csrf['csrf_token'] as String,
+      }) as Map,
+    );
+  }
+
+  Future<Map<String, dynamic>> createInstructorSession(
+    String password,
+    Map<String, dynamic> body,
+  ) => _adminWrite('/admin/sessions', password, body);
+
+  Future<List<Map<String, dynamic>>> instructorSessions(
+    String password,
+  ) async => _list(
+    await _json('GET', '/admin/sessions', null, _adminHeaders(password)),
+  );
+
+  Future<Map<String, dynamic>> disableSessionGps(String password, String id) =>
+      _adminWrite(
+        '/admin/sessions/${Uri.encodeComponent(id)}/gps/disable',
+        password,
+        {},
+      );
+
   List<Map<String, dynamic>> _list(dynamic data) =>
       (data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   Future<Map<String, dynamic>> classroom(

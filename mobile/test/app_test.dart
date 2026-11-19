@@ -24,6 +24,89 @@ class MemoryStore extends LocalStore {
 }
 
 void main() {
+  test('instructor GPS creation and disable use admin auth and CSRF, not student tokens', () async {
+    final paths = <String>[];
+    final body = {
+      'title': 'Synthetic GPS session',
+      'ttl_seconds': 300,
+      'gps': {
+        'enabled': true,
+        'latitude': 35.7,
+        'longitude': 51.4,
+        'accuracy_m': 10.0,
+        'captured_at': 1800000000.0,
+        'radius_m': 100.0,
+      },
+    };
+    final api = ClassSweepApi(
+      'http://laptop.local:8000',
+      token: 'student-token-must-not-be-used',
+      client: MockClient((request) async {
+        paths.add(request.url.path);
+        expect(
+          request.headers['Authorization'],
+          'Basic ${base64Encode(utf8.encode('admin:synthetic-password'))}',
+        );
+        if (request.url.path == '/admin/csrf') {
+          return http.Response('{"csrf_token":"synthetic-csrf"}', 200);
+        }
+        if (request.method == 'POST') {
+          expect(request.headers['X-CSRF-Token'], 'synthetic-csrf');
+        }
+        if (request.url.path == '/admin/sessions' && request.method == 'POST') {
+          expect(jsonDecode(request.body), body);
+          return http.Response(
+            '{"id":"session-1","code_a":"1234","code_b":"5678","gps":{"enabled":true}}',
+            201,
+          );
+        }
+        if (request.url.path == '/admin/sessions') {
+          return http.Response(
+            '[{"id":"session-1","gps":{"enabled":true}}]',
+            200,
+          );
+        }
+        expect(request.url.path, '/admin/sessions/session-1/gps/disable');
+        expect(jsonDecode(request.body), <String, dynamic>{});
+        return http.Response('{"id":"session-1","gps":{"enabled":false}}', 200);
+      }),
+    );
+    expect(
+      (await api.createInstructorSession('synthetic-password', body))['id'],
+      'session-1',
+    );
+    expect((await api.instructorSessions('synthetic-password')).length, 1);
+    expect(
+      (await api.disableSessionGps('synthetic-password', 'session-1'))['gps'],
+      {'enabled': false},
+    );
+    expect(paths, [
+      '/admin/csrf',
+      '/admin/sessions',
+      '/admin/sessions',
+      '/admin/csrf',
+      '/admin/sessions/session-1/gps/disable',
+    ]);
+    api.close();
+  });
+
+  test('student refreshes the live GPS policy with its bearer token', () async {
+    final api = ClassSweepApi(
+      'http://laptop.local:8000',
+      token: 'synthetic-student-token',
+      client: MockClient((request) async {
+        expect(request.url.path, '/api/sessions/session-1');
+        expect(
+          request.headers['Authorization'],
+          'Bearer synthetic-student-token',
+        );
+        return http.Response('{"id":"session-1","gps":{"enabled":false}}', 200);
+      }),
+    );
+    expect((await api.session('session-1'))['gps'], {'enabled': false});
+    api.close();
+  });
+
   test('Wi-Fi is the fresh-install default and local hostnames are valid', () {
     expect(LocalStore.defaultServer, 'http://laptop.local:8000');
     expect(

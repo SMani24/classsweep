@@ -145,6 +145,13 @@ class _DashboardState extends State<Dashboard> {
                         ),
                         const SizedBox(height: 6),
                         Text('Closes ${displayTime(session['expires_at'])}'),
+                        const SizedBox(height: 6),
+                        Text(
+                          session['gps'] is Map &&
+                                  (session['gps'] as Map)['enabled'] == true
+                              ? 'GPS required · within ${(session['gps'] as Map)['radius_m']} m'
+                              : 'GPS not required',
+                        ),
                         const SizedBox(height: 14),
                         FilledButton.icon(
                           onPressed: user.approved && !model.refreshing
@@ -159,8 +166,8 @@ class _DashboardState extends State<Dashboard> {
                 ),
               const InfoCard(
                 icon: Icons.phonelink_lock_rounded,
-                title: 'Three local checks',
-                body: 'Sweep the room and scan both codes. Match your face with a random head turn. Recheck the board with the rear camera. Only results leave your phone.',
+                title: 'Checks on your phone',
+                body: 'Scan the board and match your enrolled face. If the instructor enables GPS, your phone also checks your distance from the classroom. Student coordinates stay on this phone; only processed results leave it.',
               ),
             ],
             if (_tab == 1) ...[
@@ -182,7 +189,14 @@ class _DashboardState extends State<Dashboard> {
                       record['title'] as String? ??
                           record['session_id'] as String,
                     ),
-                    subtitle: Text(displayTime(record['recorded_at'])),
+                    subtitle: Text(
+                      '${displayTime(record['recorded_at'])}'
+                      '${record['gps_status'] == 'passed'
+                          ? '\nGPS passed · ${(record['location']['distance_m'] as num).toStringAsFixed(0)} m from center'
+                          : record['gps_status'] == 'disabled'
+                          ? '\nGPS not required'
+                          : ''}',
+                    ),
                   ),
                 ),
             ],

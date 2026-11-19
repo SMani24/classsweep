@@ -14,7 +14,7 @@ Do not add frame upload, camera logging, analytics, or crash attachments contain
 
 ## Transport
 
-For a personal demonstration, prefer USB `adb reverse` to connect the phone to the server over localhost. The prototype also permits cleartext HTTP to a trusted local network for convenient classroom experiments. HTTP does not encrypt passwords, enrollment images, or attendance traffic. Use HTTPS before collecting real students' data on a shared network. Never expose this development server directly to the internet.
+Wi-Fi is the default: the launcher binds to the selected local Wi-Fi/Ethernet address and advertises `laptop.local` through Avahi for the server’s lifetime. The alias is a convenience name, not authentication. Optional `--local-only` plus USB `adb reverse` is still available. HTTP does not encrypt passwords, enrollment images, or attendance traffic. Use HTTPS before collecting real students' data on a shared network. Never expose this development server directly to the internet.
 
 ## Limits
 

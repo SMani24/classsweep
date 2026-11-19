@@ -7,9 +7,13 @@ From the repository root:
 python3 scripts/run_server.py
 ```
 
-The instructor dashboard is at `http://127.0.0.1:8000/admin`. Username: `admin`. The startup helper generates and stores a random password in the Git-ignored `data/admin-password.txt`, with owner-only permissions. It also places the SQLite database under `data/`. Do not publish this directory.
+The instructor dashboard is at `http://laptop.local:8000/admin`. Username: `admin`. The startup helper generates and stores a random password in the Git-ignored `data/admin-password.txt`, with owner-only permissions. It also places the SQLite database under `data/`. Do not publish this directory.
 
-Use `adb reverse tcp:8000 tcp:8000` for a USB-connected Android phone. For a trusted-network demonstration, `python3 scripts/run_server.py --lan` listens on all local interfaces; set the phone's server address to the laptop's LAN IP. HTTP is unencrypted. Use HTTPS for real student data over a shared network.
+Wi-Fi/LAN is the default: the launcher selects a physical Wi-Fi/Ethernet IPv4 address, binds to it, and publishes a temporary `laptop.local` alias through the running Avahi daemon. It prints the numeric IP fallback and removes the alias when the server stops. No system hostname change or root privileges are needed. `--lan` remains a compatibility flag. The phone does not need USB.
+
+Install `avahi-daemon avahi-utils` if missing on another Debian/Ubuntu laptop; start Avahi through the system service manager. If Avahi is unavailable or the name conflicts, the server continues at its printed IP address. Use `--hostname classsweep.local` for a different alias, `--interface enp1s0` to choose an interface, or `--no-mdns` to use only the IP. Restart after changing networks/IPs.
+
+Optional USB mode: start with `--local-only`, run `adb reverse tcp:8000 tcp:8000`, and use `http://127.0.0.1:8000` on the phone. HTTP is unencrypted in both modes. See [Wi-Fi troubleshooting](../docs/WIFI.md).
 
 For manual startup, set `CLASSSWEEP_ADMIN_PASSWORD` and `CLASSSWEEP_DATA_DIR`, then run `python -m uvicorn classsweep.app:create_app --factory` from this directory inside the root virtual environment. There is no default administrator password. Optional CORS origins are configured using a comma-separated `CLASSSWEEP_CORS_ORIGINS`; the Android app does not need CORS.
 

@@ -11,30 +11,25 @@ From the repository root:
 python3 scripts/run_server.py
 ```
 
-The first launch generates a random administrator password in `data/admin-password.txt`, readable only by your Linux user. The username is `admin`. Open <http://127.0.0.1:8000/admin> on the laptop. Runtime files under `data/` are ignored by Git.
+The first launch generates a random administrator password in `data/admin-password.txt`, readable only by your Linux user. The username is `admin`. Open <http://laptop.local:8000/admin> (or the IP fallback printed by the launcher) on the laptop. Runtime files under `data/` are ignored by Git.
 
-## 2. Connect the phone
+## 2. Connect over Wi-Fi — no cable needed
 
-Enable Android Developer options and USB debugging, connect the phone by USB, and accept the phone's authorization prompt:
+Put the phone and laptop on the same Wi-Fi. The launcher advertises `laptop.local` while it runs. In the app's **Connection & privacy** settings, enter `http://laptop.local:8000`, tap **Test connection**, then **Save server**. The new app uses this address by default; an existing saved address is not silently replaced.
 
-```bash
-adb devices
-adb reverse tcp:8000 tcp:8000
-```
+First open `http://laptop.local:8000/health` in the phone's browser: it should show `status: ok` and `service: classsweep`. If the name does not resolve, use the **IP fallback** printed by the laptop, such as `http://192.168.1.20:8000`. No router configuration is normally required. See [WIFI.md](WIFI.md) for older Android devices, guest-network isolation, VPNs, firewall checks and optional USB mode.
 
-Keep the cable connected. In ClassSweep, use `http://127.0.0.1:8000` as the server address. No router configuration is required.
-
-For a Wi-Fi-only demonstration, start `python3 scripts/run_server.py --lan`, put both devices on the same trusted network, and enter `http://LAPTOP_LAN_IP:8000` on the phone. A guest network may prevent devices communicating. Cleartext LAN traffic is not appropriate for real students' enrollment data.
+Keep the laptop awake and the server running. Restart the server after changing Wi-Fi networks or the laptop's IP address. LAN HTTP does not encrypt traffic; use a trusted local network for your own prototype testing.
 
 ## 3. Build and install
 
-If you already have the supplied `ClassSweep-debug.apk`, install it directly with `adb install -r /path/to/ClassSweep-debug.apk` and skip the build. It is an ARM64 debug package for Android 7.0 or newer.
+If you already have the supplied `ClassSweep-debug.apk`, copy it to your phone, open it, allow installation from the chosen source if Android asks, and skip the build. Update the existing app rather than uninstalling it. USB is optional for transferring or installing the APK. It is an ARM64 debug package for Android 7.0 or newer.
 
 Flutter and Android SDK/build tools must be installed. The repository's pinned dependencies and model manifest are used by:
 
 ```bash
 ./scripts/build_android.sh
-adb install -r "$HOME/apks/ClassSweep-debug.apk"
+# Copy ~/apks/ClassSweep-debug.apk to your phone and open it to install.
 ```
 
 The first build compiles OpenCV and may take several minutes. Native builds are capped at three workers to avoid overwhelming the laptop. The supplied build targets 64-bit ARM Android phones. An older 32-bit phone needs a separate `--target-platform android-arm` build.

@@ -5,8 +5,9 @@ This prototype has not yet been run on a physical Android phone. iOS is deferred
 ## Verified locally
 
 - Flutter 3.47.9 / Dart 3.13.7: static analysis reports no issues.
-- 16 Flutter tests pass: OCR voting, movement/head challenge sequencing and failure cases, reference validation, actual native YuNet/SFace execution, native ORB matching, native optical flow, HTTP reference binding, and sign-in/registration layout at 320px and 390px widths.
-- 11 Python server tests pass: enrollment approval/purge, exact reference hash, authentication, invalid uploads, device/reference/direction mismatch, ownership, expiry, replay, atomic duplicate prevention, room-version pinning, and admin forms/revocation.
+- 19 Flutter tests pass: OCR voting, movement/head challenge sequencing and failure cases, reference validation, actual native YuNet/SFace execution, native ORB matching, native optical flow, HTTP reference binding, sign-in/registration layout at 320px and 390px widths, Wi-Fi settings, local hostname acceptance, and credential-free connection probes.
+- 17 Python server tests pass: enrollment approval/purge, exact reference hash, authentication, invalid uploads, device/reference/direction mismatch, ownership, expiry, replay, atomic duplicate prevention, room-version pinning, admin forms/revocation, LAN address selection excluding virtual networks, local hostname validation and launcher cleanup.
+- LAN verification: `laptop.local` resolves through Avahi to the selected Wi-Fi IPv4 address on the laptop, and `/health` responds through both hostname and IP. A separate launcher was stopped with SIGTERM; its child server port closed. Phone-to-laptop Wi-Fi and phone-side `.local` resolution still need physical testing.
 - The Linux server starts through the supplied helper; health and authenticated dashboard requests succeed. Its generated administrator password file has owner-only permissions.
 - Android debug APK builds successfully. Its signature verifies; package inspection confirms Android 7.0+ (API 24), ARM64-only native libraries, both original model checksums and upstream license files, and no microphone permission or private database/password files.
 - Source publication audit excludes runtime data, enrollment images, credentials, downloaded model weights and APKs. Public source contains only synthetic test data.

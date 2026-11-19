@@ -2,7 +2,7 @@ name: classsweep
 description: "On-device classroom attendance with a visual sweep and face verification."
 publish_to: 'none'
 
-version: 1.0.1+2
+version: 1.1.0+3
 
 environment:
   sdk: ^3.13.7
@@ -23,6 +23,7 @@ dependencies:
   image: ^4.13.1
   camera_android: ^0.10.13
   crypto: ^3.0.8
+  geolocator: ^14.1.2
 
 dev_dependencies:
   flutter_test:

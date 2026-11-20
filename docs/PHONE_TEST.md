@@ -41,9 +41,9 @@ Successful builds replace `~/apks/ClassSweep-debug.apk` with the latest version.
 1. On the instructor phone, open **Instructor sign-in** and enter the server's administrator password. Relaunch the app once to verify that the sign-in is remembered.
 2. Open **Classroom calibration → Open camera**. Frame a textured, mostly flat board area. Take a photo, tap **Use photo**, and save the classroom reference.
 3. On the student phone, register and tap **Enroll my face**. Follow the front, left and right prompts. Review the photos and submit the front photo for approval. Approve it in the laptop dashboard and wait for **Ready to check in** on the phone.
-4. In the laptop dashboard, create a session. Open **Override board codes for testing** if you already have two paper codes. Close the old session before reusing them. Leave GPS off for the first trial.
+4. Create a session in **Attendance sessions** on the instructor phone or on the laptop dashboard. Open **Override board codes for testing** if you already have two paper codes. Close the old session before reusing them. Leave GPS off for the first trial.
 5. Tap **Start check-in**. Hold one code in view until it is recognized. Choose the side where the other code is posted, follow the pan arrow, hold on the second code and pan back when prompted.
-6. Follow the selfie prompts, then show the calibrated board and a code again. Tap **Record my attendance** and check **My attendance** and the laptop session's result count.
+6. Follow the selfie prompts, then show the calibrated board and a code again. Use the rear camera’s **+ / −** buttons to frame distant digits while aiming. Zoom locks during the measured pan and hold. Tap **Record my attendance** and check **My attendance** and the laptop session's result count.
 
 Use an empty classroom or your own room initially. Include texture in the reference and start near the calibration viewpoint. One reference view may not match every seat.
 

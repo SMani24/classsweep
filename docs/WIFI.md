@@ -28,6 +28,12 @@ The laptop already has Avahi available. On another Ubuntu/Debian machine, instal
 
 Changing the server URL signs you out. Face templates are scoped to the exact server URL, account, device and approved-image hash. After moving from localhost/IP to the hostname, prepare the approved face reference again before the instructor purges its image. If the image was already purged, switch back to the previously used address when available or ask for re-enrollment approval. Choose one stable URL before enrolling for the presentation.
 
+## Tablet hotspot rehearsal
+
+Join the tablet hotspot from the laptop and both phones before starting ClassSweep. Keep the tablet powered and the laptop awake. On each phone, try the laptop's printed numeric address in the browser with `/health` before testing the app. If the numeric address works while the hostname fails intermittently, use the numeric address for that demo. Restart the launcher if the laptop receives a new IP. Make the address choice before enrollment template preparation, since changing it changes the local reference scope.
+
+When troubleshooting, record the time and whether the problem is on both phones, the URL being used, and the outcome of the browser health check. On the laptop, keep the Uvicorn terminal available to see the corresponding HTTP request. The laptop health endpoint can be responsive during a phone-side Wi-Fi interruption. See the [engineering handoff](ENGINEERING_HANDOFF.md#tablet-hotspot-investigation-and-presentation-runbook) for the observed tests and failure branches.
+
 ## If it does not connect
 
 - **Hostname fails but numeric IP works:** use the printed IP address in both the browser and app. Android's updated DNS resolver supports `.local`, but older phones/resolver versions and some networks do not. Changing the laptop's hosts file will not fix the phone.

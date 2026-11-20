@@ -44,8 +44,8 @@ Each successful build updates `~/apks/ClassSweep-debug.apk`, alongside your othe
 1. On the instructor phone, choose **Instructor sign-in** and enter the dashboard password. ClassSweep saves the session. Open **Classroom calibration** and capture a textured board region in the dedicated camera.
 2. On the student phone, create an account and follow the three-pose face setup. The front photo goes to the instructor for review. The side templates stay on the phone.
 3. Approve the photo in the laptop dashboard. The student's face reference prepares automatically after approval.
-4. Create a session and write its codes on opposite sides of the board. For a rehearsal with the same paper codes, open **Override board codes for testing** on the laptop. Close the previous session before reusing its codes.
-5. Follow the on-screen arrows to scan the two codes separately, do the face turn, and recheck the board. Verify the result in the laptop dashboard.
+4. Create a session and write its codes on opposite sides of the board. For a rehearsal with the same paper codes, open **Override board codes for testing** on the instructor phone or laptop dashboard. Close the previous session before reusing its codes.
+5. Follow the on-screen arrows to scan the two codes separately, do the face turn, and recheck the board. Use the rear camera zoom if the codes are hard to read from farther away. Verify the result in the laptop dashboard.
 
 The initial calibration UI uploads one reference view. Its reliability across different seats must be evaluated. Use textured surroundings, avoid people, and start with nearby seating.
 
@@ -59,7 +59,7 @@ This is an educational attendance aid. Checks deter casual sharing and replay; t
 
 See [optional GPS setup and tests](docs/GPS.md), and [Wi-Fi setup and troubleshooting](docs/WIFI.md). Optional USB forwarding remains available with `--local-only`.
 
-Read [data handling](docs/PRIVACY.md), [the API contract](server/API.md), and [server setup](server/README.md).
+Read the [algorithm and engineering handoff](docs/ENGINEERING_HANDOFF.md), [data handling](docs/PRIVACY.md), [the API contract](server/API.md), and [server setup](server/README.md).
 
 ## Development checks
 

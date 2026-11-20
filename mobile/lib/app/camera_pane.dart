@@ -15,10 +15,16 @@ class CameraPane extends StatefulWidget {
     this.onInterrupted,
     this.height = 340,
     this.guide,
+    this.initialZoom = 1,
+    this.allowZoom = false,
+    this.onZoomChanged,
   });
   final CameraLensDirection lens;
   final double height;
   final Widget? guide;
+  final double initialZoom;
+  final bool allowZoom;
+  final ValueChanged<double>? onZoomChanged;
   final Future<void> Function(
     CameraImage,
     CameraDescription,
@@ -33,7 +39,10 @@ class CameraPane extends StatefulWidget {
 class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
   CameraController? _camera;
   Future<void> _operations = Future.value();
-  Future<void>? _processing;
+  Future<void>? _processing, _zoomTask;
+  double _minZoom = 1, _maxZoom = 1, _zoom = 1;
+  String? _zoomError;
+  Future<void>? get zoomPending => _zoomTask;
   String? _error;
   bool _active = true, _disposed = false, _taking = false;
   int _generation = 0;
@@ -60,7 +69,12 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
     _operations = _operations.catchError((_) {}).then((_) async {
       await _release();
       if (_disposed || !_active || generation != _generation) return;
-      if (mounted) setState(() => _error = null);
+      if (mounted) {
+        setState(() {
+          _error = _zoomError = null;
+          _minZoom = _maxZoom = _zoom = 1;
+        });
+      }
       try {
         final cameras = await availableCameras();
         final matching = cameras.where((c) => c.lensDirection == widget.lens);
@@ -85,12 +99,20 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
           return;
         }
         await controller.lockCaptureOrientation(DeviceOrientation.portraitUp);
+        if (widget.onZoomChanged != null) {
+          await _initializeZoom(controller);
+        }
+        if (_disposed || !_active || generation != _generation) {
+          await _release();
+          return;
+        }
         if (widget.onFrame != null) {
           await controller.startImageStream((image) {
             if (_disposed ||
                 !_active ||
                 generation != _generation ||
                 _processing != null ||
+                _zoomTask != null ||
                 _taking) {
               return;
             }
@@ -108,6 +130,105 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
         }
       }
     });
+  }
+
+  Future<void> _initializeZoom(CameraController controller) async {
+    try {
+      final min = await controller.getMinZoomLevel();
+      final max = await controller.getMaxZoomLevel();
+      if (!min.isFinite || !max.isFinite || min <= 0 || max <= min) return;
+      final zoom = widget.initialZoom.clamp(min, max).toDouble();
+      if (zoom != 1) await controller.setZoomLevel(zoom);
+      _minZoom = min;
+      _maxZoom = max;
+      _zoom = zoom;
+    } on CameraException {
+      // Some devices implement preview but do not expose camera zoom.
+    } on PlatformException {
+      // Leave the camera usable when the platform does not support zoom.
+    }
+  }
+
+  void _adjustZoom(double delta) {
+    final controller = _camera;
+    if (!widget.allowZoom ||
+        _zoomTask != null ||
+        controller == null ||
+        !_active) {
+      return;
+    }
+    final next = (_zoom + delta).clamp(_minZoom, _maxZoom).toDouble();
+    if (next == _zoom) return;
+    final generation = _generation;
+    setState(() {
+      _zoomError = null;
+      _zoomTask = _applyZoom(controller, next, generation);
+    });
+  }
+
+  Future<void> _applyZoom(
+    CameraController controller,
+    double next,
+    int generation,
+  ) async {
+    bool current() =>
+        mounted && !_disposed && _active && generation == _generation;
+    try {
+      // Drop incoming frames and finish the current inference before changing the crop.
+      await _processing;
+      if (!current()) return;
+      await controller.setZoomLevel(next);
+      await Future<void>.delayed(const Duration(milliseconds: 240));
+      if (!current()) return;
+      _zoom = next;
+      widget.onZoomChanged?.call(next);
+    } catch (_) {
+      if (current()) _zoomError = 'Could not change zoom.';
+    } finally {
+      _zoomTask = null;
+      if (current()) setState(() {});
+    }
+  }
+
+  Widget _zoomControls() {
+    final step = _maxZoom - _minZoom <= 4 ? .5 : 1.0;
+    final enabled = widget.allowZoom && _zoomTask == null;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Zoom out',
+            color: Colors.white,
+            disabledColor: Colors.white38,
+            onPressed: enabled && _zoom > _minZoom
+                ? () => _adjustZoom(-step)
+                : null,
+            icon: const Icon(Icons.remove),
+          ),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              '${_zoom.toStringAsFixed(1)}×',
+              style: const TextStyle(color: Colors.white),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Zoom in',
+            color: Colors.white,
+            disabledColor: Colors.white38,
+            onPressed: enabled && _zoom < _maxZoom
+                ? () => _adjustZoom(step)
+                : null,
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _processFrame(
@@ -134,6 +255,7 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
     final controller = _camera;
     _camera = null;
     if (controller == null) return;
+    await _zoomTask;
     try {
       if (controller.value.isStreamingImages) {
         await controller.stopImageStream();
@@ -260,6 +382,23 @@ class CameraPaneState extends State<CameraPane> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
+                    if (widget.onZoomChanged != null && _maxZoom > _minZoom)
+                      Positioned(
+                        bottom: 10,
+                        left: 0,
+                        right: 0,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_zoomError != null)
+                              Text(
+                                _zoomError!,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            _zoomControls(),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
         ),

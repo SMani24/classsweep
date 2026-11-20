@@ -195,6 +195,12 @@ class ClassSweepVision {
   }
 
   void resetRearSession() {
+    resetRearFrameHistory();
+    _sweep = null;
+  }
+
+  /// Discard measurements that cross a camera zoom change. Keep the sweep phase.
+  void resetRearFrameHistory() {
     _check();
     _previousGray?.dispose();
     _previousGray = null;
@@ -205,7 +211,6 @@ class ClassSweepVision {
     _lastSceneAt = null;
     _lastCodes = [];
     _lastSceneMatch = const SceneMatch(hasReference: false);
-    _sweep = null;
   }
 
   cv.Mat _small(cv.Mat bgr) {

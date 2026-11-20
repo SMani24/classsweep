@@ -36,6 +36,8 @@ class AttendancePage extends StatefulWidget {
 
 class _AttendancePageState extends State<AttendancePage> {
   ClassSweepVision? _vision;
+  final _camera = GlobalKey<CameraPaneState>();
+  double _rearZoom = 1;
   late final Future<void> _initialization;
   Future<void>? _frameTask;
   CaptureStage _stage = CaptureStage.preparing;
@@ -175,6 +177,7 @@ class _AttendancePageState extends State<AttendancePage> {
     _selectingPan = true;
     final generation = _generation;
     try {
+      await _camera.currentState?.zoomPending;
       await _frameTask;
       if (!mounted ||
           generation != _generation ||
@@ -185,6 +188,26 @@ class _AttendancePageState extends State<AttendancePage> {
     } finally {
       _selectingPan = false;
     }
+  }
+
+  bool get _canAdjustZoom {
+    if (_stage == CaptureStage.recheck) return true;
+    if (_stage != CaptureStage.scan || _selectingPan) return false;
+    final phase = _sweep?.phase;
+    return phase == null ||
+        phase == SweepPhase.complete ||
+        (phase == SweepPhase.pause && _codes.second == null);
+  }
+
+  void _zoomChanged(double level) {
+    if (_stage != CaptureStage.scan && _stage != CaptureStage.recheck) return;
+    _vision!.resetRearFrameHistory();
+    _rear = null;
+    _recheckSceneAt = null;
+    _recheckCodeAt = null;
+    _recheckRoom = null;
+    _rearZoom = level;
+    setState(() {});
   }
 
   String get _faceStatus {
@@ -557,11 +580,14 @@ class _AttendancePageState extends State<AttendancePage> {
               ),
               Expanded(
                 child: CameraPane(
-                  key: const ValueKey('attendance-camera'),
+                  key: _camera,
                   lens: face
                       ? CameraLensDirection.front
                       : CameraLensDirection.back,
                   height: double.infinity,
+                  allowZoom: _canAdjustZoom,
+                  initialZoom: face ? 1 : _rearZoom,
+                  onZoomChanged: face ? null : _zoomChanged,
                   guide: face
                       ? FaceGuide(ready: _selfie?.identityMatches == true)
                       : null,

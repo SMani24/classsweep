@@ -26,7 +26,7 @@ class PageProvider implements LocationProvider {
 class PageApi extends ClassSweepApi {
   PageApi() : super('http://localhost:8000');
   Map<String, dynamic>? body;
-  String? disabledId;
+  String? disabledId, closedId;
   List<Map<String, dynamic>> active = [];
   int creates = 0;
   @override
@@ -38,8 +38,8 @@ class PageApi extends ClassSweepApi {
     final session = <String, dynamic>{
       ...body,
       'id': 'session-1',
-      'code_a': '1234',
-      'code_b': '5678',
+      'code_a': body['code_a'] ?? '1234',
+      'code_b': body['code_b'] ?? '5678',
       'expires_at': 4102444800,
     };
     active = [session];
@@ -49,6 +49,12 @@ class PageApi extends ClassSweepApi {
   @override
   Future<List<Map<String, dynamic>>> instructorSessions() async {
     return active;
+  }
+
+  @override
+  Future<void> closeInstructorSession(String id) async {
+    closedId = id;
+    active = active.where((session) => session['id'] != id).toList();
   }
 
   @override
@@ -167,6 +173,37 @@ void main() {
       await reveal(tester, find.text('Code A: 1234'));
       expect(find.text('Code A: 1234'), findsOneWidget);
       expect(find.text('Code B: 5678'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'phone can validate, create and close a session with custom codes',
+    (tester) async {
+      await open(tester);
+      await fill(tester);
+      await tapText(tester, 'Override board codes for testing');
+      await reveal(tester, field('First code'));
+      await tester.enterText(field('First code'), '0123');
+      await reveal(tester, field('Second code'));
+      await tester.enterText(field('Second code'), '0123');
+      await tapText(tester, 'Create attendance');
+      expect(api.creates, 0);
+      await reveal(tester, find.text('Use a different code.'));
+      await tester.enterText(field('Second code'), '0456');
+      await tapText(tester, 'Create attendance');
+      expect(api.body!['code_a'], '0123');
+      expect(api.body!['code_b'], '0456');
+      await reveal(tester, find.text('Code A: 0123'));
+      expect(find.text('Code A: 0123'), findsOneWidget);
+
+      await tapText(tester, 'Close session');
+      expect(api.closedId, isNull);
+      await tester.tap(find.widgetWithText(FilledButton, 'Close session'));
+      await tester.pumpAndSettle();
+      expect(api.closedId, 'session-1');
+      await tapText(tester, 'Create attendance');
+      expect(api.creates, 2);
+      expect(api.body!['code_a'], '0123');
     },
   );
 

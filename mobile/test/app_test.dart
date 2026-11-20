@@ -78,6 +78,29 @@ void main() {
     api.close();
   });
 
+  test(
+    'phone closes a session without following its browser redirect',
+    () async {
+      final api = ClassSweepApi(
+        'http://laptop.local:8000',
+        token: 'instructor-close',
+        client: MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/admin/sessions/test-session/close');
+          expect(request.headers['Authorization'], 'Bearer instructor-close');
+          expect(request.followRedirects, isFalse);
+          return http.Response(
+            '',
+            303,
+            headers: {'Location': '/admin#sessions'},
+          );
+        }),
+      );
+      await api.closeInstructorSession('test-session');
+      api.close();
+    },
+  );
+
   test('student refreshes the live GPS policy with its bearer token', () async {
     final api = ClassSweepApi(
       'http://laptop.local:8000',

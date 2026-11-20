@@ -72,13 +72,15 @@ class ClassSweepApi {
   Future<http.Response> _send(
     http.BaseRequest request, {
     Duration requestTimeout = timeout,
+    bool acceptSeeOther = false,
   }) async {
     try {
       final response = await _client
           .send(request)
           .then(http.Response.fromStream)
           .timeout(requestTimeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
+      if ((response.statusCode < 200 || response.statusCode >= 300) &&
+          !(acceptSeeOther && response.statusCode == 303)) {
         var message = 'Server request failed (${response.statusCode}).';
         try {
           final data = jsonDecode(response.body);
@@ -262,6 +264,16 @@ class ClassSweepApi {
           {},
         ) as Map,
       );
+
+  Future<void> closeInstructorSession(String id) async {
+    final request = http.Request(
+      'POST',
+      _uri('/admin/sessions/${Uri.encodeComponent(id)}/close'),
+    )..followRedirects = false;
+    request.headers.addAll(_headers);
+    // The existing close endpoint sends browsers back to the dashboard.
+    await _send(request, acceptSeeOther: true);
+  }
 
   List<Map<String, dynamic>> _list(dynamic data) =>
       (data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();

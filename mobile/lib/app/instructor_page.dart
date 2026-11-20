@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../location/location.dart';
 import 'app_model.dart';
@@ -17,8 +18,10 @@ class InstructorPage extends StatefulWidget {
 class _InstructorPageState extends State<InstructorPage> {
   final _form = GlobalKey<FormState>();
   final _title = TextEditingController();
+  final _codeA = TextEditingController(), _codeB = TextEditingController();
   final _ttl = TextEditingController(text: '300');
   late final _verifier = widget.verifier ?? LocationVerifier();
+  bool _overrideCodes = false;
   bool _gpsEnabled = false, _busy = false, _listed = false;
   double _radius = GpsPolicy.defaultRadiusM;
   GpsPolicy? _center;
@@ -29,6 +32,8 @@ class _InstructorPageState extends State<InstructorPage> {
   @override
   void dispose() {
     _title.dispose();
+    _codeA.dispose();
+    _codeB.dispose();
     _ttl.dispose();
     _center = null;
     _created = null;
@@ -72,6 +77,9 @@ class _InstructorPageState extends State<InstructorPage> {
     if (!_form.currentState!.validate()) return;
     final title = _title.text.trim();
     final ttl = int.parse(_ttl.text.trim());
+    final testCodes = _overrideCodes
+        ? {'code_a': _codeA.text, 'code_b': _codeB.text}
+        : const <String, String>{};
     _start();
     setState(() {
       _center = null;
@@ -87,15 +95,19 @@ class _InstructorPageState extends State<InstructorPage> {
         'title': title,
         'ttl_seconds': ttl,
         'gps': center.toJson(),
+        ...testCodes,
       });
       if (!mounted) return;
       setState(() {
         _center = center.enabled ? center : null;
-        _created = {...result, 'gps': center.toJson()};
+        _created = result;
+        _sessions = [
+          result,
+          ..._sessions.where((item) => item['id'] != result['id']),
+        ];
         _notice =
             'Attendance session created. Display both codes in the classroom.';
       });
-      await _loadSessions();
     } catch (error) {
       _failed(error);
     } finally {
@@ -166,13 +178,76 @@ class _InstructorPageState extends State<InstructorPage> {
     }
   }
 
-  List<Map<String, dynamic>> get _activeSessions {
-    final now = DateTime.now().millisecondsSinceEpoch / 1000;
-    return _sessions.where((session) {
-      final expires = session['expires_at'];
-      return expires is num && expires.isFinite && expires > now;
-    }).toList();
+  Future<void> _close(Map<String, dynamic> session) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Close this session?'),
+        content: const Text('Check-ins will end. Recorded attendance is kept.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Close session'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true || _busy) return;
+    final id = session['id'] as String;
+    _start();
+    try {
+      await widget.model.api.closeInstructorSession(id);
+      if (!mounted) return;
+      setState(() {
+        _sessions = _sessions.where((item) => item['id'] != id).toList();
+        if (_created?['id'] == id) {
+          _created = null;
+          _center = null;
+        }
+        _notice = 'Session closed. The test codes can be reused.';
+      });
+    } catch (error) {
+      _failed(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
+
+  bool _isActive(Map<String, dynamic> session) {
+    final expires = session['expires_at'];
+    return expires is num &&
+        expires.isFinite &&
+        expires > DateTime.now().millisecondsSinceEpoch / 1000;
+  }
+
+  List<Map<String, dynamic>> get _activeSessions =>
+      _sessions.where(_isActive).toList();
+
+  Widget _codeField(
+    String label,
+    TextEditingController controller, {
+    bool second = false,
+  }) => TextFormField(
+    controller: controller,
+    enabled: !_busy,
+    keyboardType: TextInputType.number,
+    inputFormatters: [
+      FilteringTextInputFormatter.digitsOnly,
+      LengthLimitingTextInputFormatter(4),
+    ],
+    decoration: InputDecoration(labelText: label, counterText: ''),
+    validator: (value) {
+      if (value == null || !RegExp(r'^[0-9]{4}$').hasMatch(value)) {
+        return 'Enter 4 digits.';
+      }
+      if (second && value == _codeA.text) return 'Use a different code.';
+      return null;
+    },
+  );
 
   String _policyLabel(Object? json) {
     try {
@@ -187,6 +262,7 @@ class _InstructorPageState extends State<InstructorPage> {
 
   Widget _sessionCard(Map<String, dynamic> session, {bool created = false}) {
     final gps = session['gps'];
+    final active = _isActive(session);
     final enabled = gps is Map && gps['enabled'] == true;
     return Card(
       child: Padding(
@@ -221,14 +297,26 @@ class _InstructorPageState extends State<InstructorPage> {
             ),
             const SizedBox(height: 12),
             Text(_policyLabel(gps)),
-            if (enabled) ...[
+            if (active) ...[
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _busy ? null : () => _disable(session),
-                icon: const Icon(Icons.location_off_outlined),
-                label: const Text('Disable GPS now'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  if (enabled)
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : () => _disable(session),
+                      icon: const Icon(Icons.location_off_outlined),
+                      label: const Text('Disable GPS now'),
+                    ),
+                  OutlinedButton(
+                    onPressed: _busy ? null : () => _close(session),
+                    child: const Text('Close session'),
+                  ),
+                ],
               ),
-            ],
+            ] else
+              const Text('Session closed'),
           ],
         ),
       ),
@@ -312,6 +400,19 @@ class _InstructorPageState extends State<InstructorPage> {
             Text(
               'Required accuracy: ±${(_radius / 2).clamp(0, 100).toStringAsFixed(1)} m or better.',
             ),
+          ],
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Override board codes for testing'),
+            subtitle: const Text('Random codes are used by default.'),
+            value: _overrideCodes,
+            onChanged: _busy
+                ? null
+                : (value) => setState(() => _overrideCodes = value),
+          ),
+          if (_overrideCodes) ...[
+            _codeField('First code', _codeA),
+            _codeField('Second code', _codeB, second: true),
           ],
           if (_busy) const LinearProgressIndicator(semanticsLabel: 'Working'),
           if (_error != null) ErrorNotice(_error!),
